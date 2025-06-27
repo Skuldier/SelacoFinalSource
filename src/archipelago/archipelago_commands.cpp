@@ -20,8 +20,8 @@ void Archipelago_Init() {
         g_archipelagoSocket = std::make_unique<ArchipelagoSocket>();
         
         if (archipelago_autoconnect) {
-            g_archipelagoSocket->Connect(archipelago_host.GetGenericRep(CVAR_String).String, 
-                                       archipelago_port.GetGenericRep(CVAR_Int).Int);
+            const char* hostStr = archipelago_host;
+            g_archipelagoSocket->Connect(std::string(hostStr), archipelago_port);
         }
     }
 }
@@ -54,7 +54,7 @@ void Archipelago_ProcessMessages() {
                 Printf("Archipelago: Data received: %s\n", msg.data.c_str());
                 break;
                 
-            case ArchipelagoMessageType::ERROR:
+            case ArchipelagoMessageType::MSG_ERROR:
                 Printf(TEXTCOLOR_RED "Archipelago error: %s\n", msg.data.c_str());
                 break;
                 
@@ -67,7 +67,7 @@ void Archipelago_ProcessMessages() {
 // Console Commands
 
 CCMD(archipelago_connect) {
-    if (argv.argc() < 1) {
+    if (argv.argc() <= 1) {
         // Use CVars
         if (!g_archipelagoSocket) {
             g_archipelagoSocket = std::make_unique<ArchipelagoSocket>();
@@ -78,8 +78,8 @@ CCMD(archipelago_connect) {
             return;
         }
         
-        if (g_archipelagoSocket->Connect(archipelago_host.GetGenericRep(CVAR_String).String,
-                                       archipelago_port.GetGenericRep(CVAR_Int).Int)) {
+        const char* hostStr = archipelago_host;
+        if (g_archipelagoSocket->Connect(std::string(hostStr), archipelago_port)) {
             Printf("Connected to Archipelago server\n");
         } else {
             Printf(TEXTCOLOR_RED "Failed to connect: %s\n", 
@@ -194,9 +194,9 @@ CCMD(archipelago_help) {
     Printf("  archipelago_debug - Toggle debug mode\n");
     Printf("\nCVars:\n");
     Printf("  archipelago_host - Default server hostname (current: %s)\n", 
-           archipelago_host.GetGenericRep(CVAR_String).String);
+           (const char*)archipelago_host);
     Printf("  archipelago_port - Default server port (current: %d)\n", 
-           archipelago_port.GetGenericRep(CVAR_Int).Int);
+           (int)archipelago_port);
     Printf("  archipelago_autoconnect - Auto-connect on startup (current: %s)\n",
            archipelago_autoconnect ? "true" : "false");
 }

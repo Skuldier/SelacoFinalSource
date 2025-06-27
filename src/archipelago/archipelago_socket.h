@@ -30,7 +30,7 @@ enum class ArchipelagoMessageType : uint8_t {
     PING = 0x03,
     PONG = 0x04,
     DATA = 0x05,
-    ERROR = 0xFF
+    MSG_ERROR = 0xFF  // ERROR conflicts with Windows macro
 };
 
 // Basic message structure

@@ -3,6 +3,11 @@
 #include "c_dispatch.h"
 #include <cstring>
 #include <sstream>
+#include <chrono>
+
+#ifndef _WIN32
+#include <fcntl.h>
+#endif
 
 int ArchipelagoSocket::s_socketsInitialized = 0;
 
