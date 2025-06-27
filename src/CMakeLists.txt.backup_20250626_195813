@@ -1182,17 +1182,6 @@ set (PCH_SOURCES
 	utility/nodebuilder/nodebuild_gl.cpp
 	utility/nodebuilder/nodebuild_utility.cpp
 )
-# Archipelago integration sources
-set(ARCHIPELAGO_SOURCES
-    archipelago/archipelago_socket.cpp
-    archipelago/archipelago_commands.cpp
-)
-
-set(ARCHIPELAGO_HEADERS
-    archipelago/archipelago_socket.h
-    archipelago/archipelago_integration.h
-)
-
 
 if( ${HAVE_VM_JIT} )
 	set( PCH_SOURCES ${PCH_SOURCES} ${VM_JIT_SOURCES} )
@@ -1253,8 +1242,6 @@ set( GAME_SOURCES
 	common/filesystem/source/unicode.cpp
 	common/filesystem/source/critsec.cpp
 
-	${ARCHIPELAGO_SOURCES}
-	${ARCHIPELAGO_HEADERS}
 )
 
 set( GAME_NONPCH_SOURCES ${GAME_SOURCES} )
@@ -1350,7 +1337,6 @@ include_directories(
 	../libraries/ZWidget/include
 	../libraries/webp/include
 	${SYSTEM_SOURCES_DIR}
-	archipelago
 )
 
 add_dependencies( zdoom revision_check )
@@ -1557,6 +1543,3 @@ source_group("Launcher" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/launche
 source_group("Versioning" FILES version.h win32/zdoom.rc)
 source_group("Xlat" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/xlat/.+" FILES ${CMAKE_CURRENT_BINARY_DIR}/xlat_parser.c ${CMAKE_CURRENT_BINARY_DIR}/xlat_parser.h)
 source_group("Source Files" FILES ${CMAKE_CURRENT_BINARY_DIR}/sc_man_scanner.h common/engine/sc_man_scanner.re)
-
-source_group("Archipelago" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/archipelago/.+")
-

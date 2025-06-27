@@ -125,8 +125,7 @@
 
 
 #ifdef __unix__
-#include "i_system.h"
-#include "archipelago/archipelago_integration.h"  // for SHARE_DIR
+#include "i_system.h"  // for SHARE_DIR
 #endif // __unix__
 
 using namespace FileSys;
@@ -186,7 +185,6 @@ void InitWidgetResources(const char* basewad);
 
 bool D_CheckNetGame ();
 void D_ProcessEvents ();
-				Archipelago_ProcessMessages();
 void G_BuildTiccmd (ticcmd_t* cmd);
 void D_DoAdvanceDemo ();
 void D_LoadWadSettings ();
@@ -3423,12 +3421,6 @@ static int D_InitGame(const FIWADInfo* iwad_info, std::vector<std::string>& allw
 	if (!batchrun) Printf("S_Init: Setting up sound.\n");
 	S_Init();
 	CLOCK_END("Sound Startup")
-	
-	// Initialize Archipelago support
-	CLOCK_START
-	if (!batchrun) Printf("Archipelago: Initializing network support.\n");
-	Archipelago_Init();
-	CLOCK_END("Archipelago Startup")
 	
 	bool writeCache = Args->CheckParm("-writetexturecache");
 	int max_progress = TexMan.GuesstimateNumTextures();
