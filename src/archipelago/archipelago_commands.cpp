@@ -2,7 +2,7 @@
 #include "c_dispatch.h"
 #include "c_cvars.h"
 #include "doomtype.h"
-#include "menu/menu.h"  // For M_ClearMenus and menu functions
+#include "common/menu/menu.h"  // For M_ClearMenus and menu functions
 #include <memory>
 #include <sstream>
 

@@ -1,23 +1,19 @@
 // Archipelago Menu Implementation for Selaco
-#include "menu/menu.h"
+#include "common/menu/menu.h"
 #include "c_dispatch.h"
 #include "c_cvars.h"
 #include "v_text.h"
-#include "v_video.h"
 #include "gi.h"
 #include "g_game.h"
 #include "s_sound.h"
+#include "doomstat.h"  // For sound channel definitions
 
 // External CVars from archipelago_commands.cpp
 EXTERN_CVAR(String, archipelago_host)
 EXTERN_CVAR(Int, archipelago_port)
 EXTERN_CVAR(String, archipelago_slot)
 EXTERN_CVAR(String, archipelago_password)
-
-// Forward declarations
-void Archipelago_Connect();
-void Archipelago_Disconnect();
-bool Archipelago_IsConnected();
+EXTERN_CVAR(Float, snd_menuvolume)
 
 //=============================================================================
 //
@@ -39,11 +35,11 @@ CCMD(menu_archipelago)
 
 //=============================================================================
 //
-// Connection Handler Functions
+// Menu Commands for MENUDEF
 //
 //=============================================================================
 
-void ArchipelagoMenu_Connect()
+CCMD(archipelago_connect_menu)
 {
     // Validate input
     if (strlen(archipelago_slot) == 0)
@@ -65,58 +61,7 @@ void ArchipelagoMenu_Connect()
     M_ClearMenus();
     
     // Execute the connection command
-    C_DoCommand(connectCmd);
-}
-
-void ArchipelagoMenu_Disconnect()
-{
-    C_DoCommand("archipelago_disconnect");
-    
-    // Play disconnect sound
-    S_Sound(CHAN_VOICE, CHANF_UI, "menu/dismiss", snd_menuvolume, ATTN_NONE);
-    
-    // Return to archipelago menu
-    M_SetMenu("ArchipelagoMenu", -1);
-}
-
-void ArchipelagoMenu_ShowStatus()
-{
-    C_DoCommand("archipelago_status");
-}
-
-//=============================================================================
-//
-// Menu Action Functions (called from ZScript)
-//
-//=============================================================================
-
-DEFINE_ACTION_FUNCTION(_ArchipelagoMenu, Connect)
-{
-    PARAM_PROLOGUE;
-    ArchipelagoMenu_Connect();
-    return 0;
-}
-
-DEFINE_ACTION_FUNCTION(_ArchipelagoMenu, Disconnect)
-{
-    PARAM_PROLOGUE;
-    ArchipelagoMenu_Disconnect();
-    return 0;
-}
-
-DEFINE_ACTION_FUNCTION(_ArchipelagoMenu, ShowStatus)
-{
-    PARAM_PROLOGUE;
-    ArchipelagoMenu_ShowStatus();
-    return 0;
-}
-
-DEFINE_ACTION_FUNCTION(_ArchipelagoMenu, IsConnected)
-{
-    PARAM_PROLOGUE;
-    // Check if we're connected by trying to get status
-    // This is a simplified check - you may want to expose the actual connection state
-    ACTION_RETURN_BOOL(false); // Placeholder - implement actual connection check
+    C_DoCommand(connectCmd.GetChars());
 }
 
 //=============================================================================

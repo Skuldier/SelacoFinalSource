@@ -14,15 +14,6 @@ EXTERN_CVAR(Bool, archipelago_debug)
 // Menu initialization
 void InitArchipelagoMenu();
 
-// Menu action handlers
-void ArchipelagoMenu_Connect();
-void ArchipelagoMenu_Disconnect();
-void ArchipelagoMenu_ShowStatus();
-
-// Helper functions
-bool Archipelago_IsConnected();
-const char* Archipelago_GetConnectionStatus();
-
 // Required includes for menu.cpp
 void M_ClearMenus();
 void M_StartControlPanel(bool makeSound);
