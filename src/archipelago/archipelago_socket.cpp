@@ -8,6 +8,7 @@
 #include <ctime>
 #include <random>
 #include <iomanip>
+#include <miniz.h>
 
 #ifndef _WIN32
 #include <fcntl.h>
@@ -22,7 +23,8 @@ ArchipelagoSocket::ArchipelagoSocket()
     : m_socket(INVALID_SOCKET)
     , m_connected(false)
     , m_port(0)
-    , m_shouldStop(false) {
+    , m_shouldStop(false)
+    , m_compressionEnabled(false) {
     
     InitializeSockets();
 }
@@ -79,7 +81,7 @@ uint32_t ArchipelagoSocket::GenerateMaskingKey() {
 bool ArchipelagoSocket::PerformWebSocketHandshake() {
     std::string wsKey = GenerateWebSocketKey();
     
-    // Build HTTP upgrade request
+    // Build HTTP upgrade request with compression extension
     std::stringstream request;
     request << "GET / HTTP/1.1\r\n";
     request << "Host: " << m_host << ":" << m_port << "\r\n";
@@ -87,6 +89,7 @@ bool ArchipelagoSocket::PerformWebSocketHandshake() {
     request << "Connection: Upgrade\r\n";
     request << "Sec-WebSocket-Key: " << wsKey << "\r\n";
     request << "Sec-WebSocket-Version: 13\r\n";
+    request << "Sec-WebSocket-Extensions: permessage-deflate; client_no_context_takeover\r\n";
     request << "\r\n";
     
     std::string requestStr = request.str();
@@ -125,17 +128,39 @@ bool ArchipelagoSocket::PerformWebSocketHandshake() {
         return false;
     }
     
+    // Check if compression was accepted
+    if (response.find("Sec-WebSocket-Extensions: permessage-deflate") != std::string::npos) {
+        Printf(TEXTCOLOR_GREEN "WebSocket compression enabled!\n");
+        m_compressionEnabled = true;
+    }
+    
     Printf(TEXTCOLOR_GREEN "WebSocket connection established!\n");
     return true;
 }
 
 bool ArchipelagoSocket::SendWebSocketFrame(const std::string& message) {
     std::vector<uint8_t> frame;
+    std::vector<uint8_t> payload;
+    bool compressed = false;
     
-    // FIN = 1, RSV = 0, Opcode = TEXT (0x1)
-    frame.push_back(0x81);
+    // Try to compress if enabled
+    if (m_compressionEnabled && message.length() > 32) {
+        std::vector<uint8_t> compressedData;
+        if (CompressMessage(message, compressedData)) {
+            payload = compressedData;
+            compressed = true;
+        } else {
+            // Compression failed, send uncompressed
+            payload.assign(message.begin(), message.end());
+        }
+    } else {
+        payload.assign(message.begin(), message.end());
+    }
     
-    size_t len = message.length();
+    // FIN = 1, RSV1 = compressed ? 1 : 0, Opcode = TEXT (0x1)
+    frame.push_back(0x81 | (compressed ? 0x40 : 0x00));
+    
+    size_t len = payload.size();
     
     // Payload length with mask bit set
     if (len < 126) {
@@ -162,8 +187,8 @@ bool ArchipelagoSocket::SendWebSocketFrame(const std::string& message) {
     }
     
     // Masked payload
-    for (size_t i = 0; i < message.length(); ++i) {
-        frame.push_back(message[i] ^ mask[i % 4]);
+    for (size_t i = 0; i < payload.size(); ++i) {
+        frame.push_back(payload[i] ^ mask[i % 4]);
     }
     
     // Send frame
@@ -179,6 +204,7 @@ bool ArchipelagoSocket::ReceiveWebSocketFrame(std::string& message) {
     }
     
     bool fin = (header[0] & 0x80) != 0;
+    bool compressed = (header[0] & 0x40) != 0;
     uint8_t opcode = header[0] & 0x0F;
     bool masked = (header[1] & 0x80) != 0;
     
@@ -220,7 +246,18 @@ bool ArchipelagoSocket::ReceiveWebSocketFrame(std::string& message) {
     
     // Handle different frame types
     if (opcode == 0x1) { // Text frame
-        message = std::string(payload.begin(), payload.end());
+        if (compressed && m_compressionEnabled) {
+            // Decompress the payload
+            std::string decompressed;
+            if (DecompressMessage(payload, decompressed)) {
+                message = decompressed;
+            } else {
+                // Decompression failed, try as uncompressed
+                message = std::string(payload.begin(), payload.end());
+            }
+        } else {
+            message = std::string(payload.begin(), payload.end());
+        }
         return true;
     } else if (opcode == 0x8) { // Close frame
         m_connected = false;
@@ -636,4 +673,73 @@ std::string ArchipelagoSocket::GenerateUUID() {
     }
     
     return ss.str();
+}
+
+bool ArchipelagoSocket::CompressMessage(const std::string& input, std::vector<uint8_t>& output) {
+    if (!m_compressionEnabled) {
+        return false;
+    }
+    
+    // Calculate worst-case output size
+    mz_ulong compressedSize = mz_compressBound(input.length());
+    output.resize(compressedSize);
+    
+    // Compress the data
+    int ret = mz_compress2(output.data(), &compressedSize, 
+                          (const unsigned char*)input.data(), input.length(),
+                          MZ_DEFAULT_COMPRESSION);
+    
+    if (ret != MZ_OK) {
+        return false;
+    }
+    
+    // Remove the zlib header (2 bytes) and trailer (4 bytes) for raw deflate
+    if (compressedSize > 6) {
+        output.erase(output.begin(), output.begin() + 2);
+        output.resize(compressedSize - 6);
+        return output.size() < input.length();
+    }
+    
+    return false;
+}
+
+bool ArchipelagoSocket::DecompressMessage(const std::vector<uint8_t>& input, std::string& output) {
+    if (!m_compressionEnabled || input.empty()) {
+        return false;
+    }
+    
+    // Add zlib header for raw deflate stream
+    std::vector<uint8_t> zlibInput;
+    zlibInput.push_back(0x78); // CMF
+    zlibInput.push_back(0x9C); // FLG
+    zlibInput.insert(zlibInput.end(), input.begin(), input.end());
+    
+    // Add placeholder Adler-32 checksum (4 bytes)
+    zlibInput.push_back(0x00);
+    zlibInput.push_back(0x00);
+    zlibInput.push_back(0x00);
+    zlibInput.push_back(0x01);
+    
+    // Start with a reasonable buffer size
+    mz_ulong decompressedSize = input.size() * 4 + 1024;
+    std::vector<uint8_t> decompressed(decompressedSize);
+    
+    // Decompress
+    int ret = mz_uncompress(decompressed.data(), &decompressedSize,
+                           zlibInput.data(), zlibInput.size());
+    
+    if (ret == MZ_BUF_ERROR) {
+        // Buffer too small, try again with larger buffer
+        decompressedSize = input.size() * 8 + 4096;
+        decompressed.resize(decompressedSize);
+        ret = mz_uncompress(decompressed.data(), &decompressedSize,
+                           zlibInput.data(), zlibInput.size());
+    }
+    
+    if (ret != MZ_OK) {
+        return false;
+    }
+    
+    output.assign(decompressed.begin(), decompressed.begin() + decompressedSize);
+    return true;
 }

@@ -7,6 +7,7 @@
 #include <mutex>
 #include <atomic>
 #include <cstdint>
+#include <miniz.h>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -89,6 +90,10 @@ private:
     void SetNonBlocking(bool enable);
     std::string GenerateUUID();
     
+    // Compression helpers
+    bool CompressMessage(const std::string& input, std::vector<uint8_t>& output);
+    bool DecompressMessage(const std::vector<uint8_t>& input, std::string& output);
+    
     static bool InitializeSockets();
     static void CleanupSockets();
     
@@ -105,6 +110,9 @@ private:
     
     std::queue<ArchipelagoMessage> m_recvQueue;
     mutable std::mutex m_recvMutex;
+    
+    // Compression support
+    bool m_compressionEnabled;
     
     static int s_socketsInitialized;
 };
