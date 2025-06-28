@@ -7,7 +7,6 @@
 #include <mutex>
 #include <atomic>
 #include <cstdint>
-#include <miniz.h>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -21,10 +20,13 @@
     #include <arpa/inet.h>
     #include <unistd.h>
     #include <netdb.h>
+    #include <errno.h>
     typedef int socket_t;
     #define INVALID_SOCKET_VALUE -1
     #define INVALID_SOCKET -1
+    #define SOCKET_ERROR -1
     #define closesocket close
+    #define WSAEWOULDBLOCK EWOULDBLOCK
 #endif
 
 enum class ArchipelagoMessageType : uint8_t {
@@ -75,6 +77,7 @@ private:
     bool PerformWebSocketHandshake();
     bool SendWebSocketFrame(const std::string& data);
     bool ReceiveWebSocketFrame(std::string& data);
+    bool SendPongFrame(const std::vector<uint8_t>& pingData);
     std::string GenerateWebSocketKey();
     uint32_t GenerateMaskingKey();
     
@@ -89,10 +92,6 @@ private:
     bool ReceiveRawData(void* data, size_t size);
     void SetNonBlocking(bool enable);
     std::string GenerateUUID();
-    
-    // Compression helpers
-    bool CompressMessage(const std::string& input, std::vector<uint8_t>& output);
-    bool DecompressMessage(const std::vector<uint8_t>& input, std::string& output);
     
     static bool InitializeSockets();
     static void CleanupSockets();
@@ -110,9 +109,6 @@ private:
     
     std::queue<ArchipelagoMessage> m_recvQueue;
     mutable std::mutex m_recvMutex;
-    
-    // Compression support
-    bool m_compressionEnabled;
     
     static int s_socketsInitialized;
 };

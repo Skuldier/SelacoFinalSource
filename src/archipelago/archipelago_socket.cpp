@@ -8,7 +8,7 @@
 #include <ctime>
 #include <random>
 #include <iomanip>
-#include <miniz.h>
+#include <algorithm>
 
 #ifndef _WIN32
 #include <fcntl.h>
@@ -17,14 +17,17 @@
 // External CVAR declaration
 EXTERN_CVAR(Bool, archipelago_debug)
 
+// Increased limits for Archipelago
+const size_t MAX_WEBSOCKET_PAYLOAD = 10 * 1024 * 1024;  // 10MB max
+const size_t RECV_BUFFER_SIZE = 8192;  // 8KB chunks
+
 int ArchipelagoSocket::s_socketsInitialized = 0;
 
 ArchipelagoSocket::ArchipelagoSocket() 
     : m_socket(INVALID_SOCKET)
     , m_connected(false)
     , m_port(0)
-    , m_shouldStop(false)
-    , m_compressionEnabled(false) {
+    , m_shouldStop(false) {
     
     InitializeSockets();
 }
@@ -78,204 +81,35 @@ uint32_t ArchipelagoSocket::GenerateMaskingKey() {
     return rd();
 }
 
-bool ArchipelagoSocket::PerformWebSocketHandshake() {
-    std::string wsKey = GenerateWebSocketKey();
+std::string ArchipelagoSocket::GenerateUUID() {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, 15);
+    std::uniform_int_distribution<> dis2(8, 11);
     
-    // Build HTTP upgrade request with compression extension
-    std::stringstream request;
-    request << "GET / HTTP/1.1\r\n";
-    request << "Host: " << m_host << ":" << m_port << "\r\n";
-    request << "Upgrade: websocket\r\n";
-    request << "Connection: Upgrade\r\n";
-    request << "Sec-WebSocket-Key: " << wsKey << "\r\n";
-    request << "Sec-WebSocket-Version: 13\r\n";
-    request << "Sec-WebSocket-Extensions: permessage-deflate; client_no_context_takeover\r\n";
-    request << "\r\n";
-    
-    std::string requestStr = request.str();
-    
-    if (archipelago_debug) {
-        Printf("Sending WebSocket upgrade request:\n%s", requestStr.c_str());
+    std::stringstream ss;
+    int i;
+    for (i = 0; i < 8; i++) {
+        ss << std::hex << dis(gen);
     }
-    
-    // Send upgrade request
-    if (!SendRawData(requestStr.c_str(), requestStr.length())) {
-        return false;
+    ss << "-";
+    for (i = 0; i < 4; i++) {
+        ss << std::hex << dis(gen);
     }
-    
-    // Read response
-    char buffer[1024];
-    std::string response;
-    
-    // Read until we have the complete HTTP headers
-    while (response.find("\r\n\r\n") == std::string::npos) {
-        int bytes = recv(m_socket, buffer, sizeof(buffer) - 1, 0);
-        if (bytes <= 0) {
-            m_lastError = "Failed to receive WebSocket upgrade response";
-            return false;
-        }
-        buffer[bytes] = '\0';
-        response += buffer;
+    ss << "-4";
+    for (i = 0; i < 3; i++) {
+        ss << std::hex << dis(gen);
     }
-    
-    if (archipelago_debug) {
-        Printf("WebSocket upgrade response:\n%s", response.c_str());
+    ss << "-";
+    ss << std::hex << dis2(gen);
+    for (i = 0; i < 3; i++) {
+        ss << std::hex << dis(gen);
     }
-    
-    // Check for successful upgrade
-    if (response.find("HTTP/1.1 101") == std::string::npos) {
-        m_lastError = "WebSocket upgrade failed";
-        return false;
+    ss << "-";
+    for (i = 0; i < 12; i++) {
+        ss << std::hex << dis(gen);
     }
-    
-    // Check if compression was accepted
-    if (response.find("Sec-WebSocket-Extensions: permessage-deflate") != std::string::npos) {
-        Printf(TEXTCOLOR_GREEN "WebSocket compression enabled!\n");
-        m_compressionEnabled = true;
-    }
-    
-    Printf(TEXTCOLOR_GREEN "WebSocket connection established!\n");
-    return true;
-}
-
-bool ArchipelagoSocket::SendWebSocketFrame(const std::string& message) {
-    std::vector<uint8_t> frame;
-    std::vector<uint8_t> payload;
-    bool compressed = false;
-    
-    // Try to compress if enabled
-    if (m_compressionEnabled && message.length() > 32) {
-        std::vector<uint8_t> compressedData;
-        if (CompressMessage(message, compressedData)) {
-            payload = compressedData;
-            compressed = true;
-        } else {
-            // Compression failed, send uncompressed
-            payload.assign(message.begin(), message.end());
-        }
-    } else {
-        payload.assign(message.begin(), message.end());
-    }
-    
-    // FIN = 1, RSV1 = compressed ? 1 : 0, Opcode = TEXT (0x1)
-    frame.push_back(0x81 | (compressed ? 0x40 : 0x00));
-    
-    size_t len = payload.size();
-    
-    // Payload length with mask bit set
-    if (len < 126) {
-        frame.push_back(0x80 | static_cast<uint8_t>(len));
-    } else if (len < 65536) {
-        frame.push_back(0x80 | 126);
-        frame.push_back((len >> 8) & 0xFF);
-        frame.push_back(len & 0xFF);
-    } else {
-        m_lastError = "Message too large for WebSocket frame";
-        return false;
-    }
-    
-    // Masking key (required for client->server)
-    uint32_t maskKey = GenerateMaskingKey();
-    uint8_t mask[4];
-    mask[0] = (maskKey >> 24) & 0xFF;
-    mask[1] = (maskKey >> 16) & 0xFF;
-    mask[2] = (maskKey >> 8) & 0xFF;
-    mask[3] = maskKey & 0xFF;
-    
-    for (int i = 0; i < 4; ++i) {
-        frame.push_back(mask[i]);
-    }
-    
-    // Masked payload
-    for (size_t i = 0; i < payload.size(); ++i) {
-        frame.push_back(payload[i] ^ mask[i % 4]);
-    }
-    
-    // Send frame
-    return SendRawData(frame.data(), frame.size());
-}
-
-bool ArchipelagoSocket::ReceiveWebSocketFrame(std::string& message) {
-    uint8_t header[2];
-    
-    // Read frame header
-    if (!ReceiveRawData(header, 2)) {
-        return false;
-    }
-    
-    bool fin = (header[0] & 0x80) != 0;
-    bool compressed = (header[0] & 0x40) != 0;
-    uint8_t opcode = header[0] & 0x0F;
-    bool masked = (header[1] & 0x80) != 0;
-    
-    uint64_t payloadLen = header[1] & 0x7F;
-    
-    // Extended payload length
-    if (payloadLen == 126) {
-        uint8_t extLen[2];
-        if (!ReceiveRawData(extLen, 2)) {
-            return false;
-        }
-        payloadLen = (extLen[0] << 8) | extLen[1];
-    } else if (payloadLen == 127) {
-        // 64-bit length not supported
-        m_lastError = "WebSocket frame too large";
-        return false;
-    }
-    
-    // Masking key (if present)
-    uint8_t mask[4] = {0};
-    if (masked) {
-        if (!ReceiveRawData(mask, 4)) {
-            return false;
-        }
-    }
-    
-    // Read payload
-    std::vector<uint8_t> payload(payloadLen);
-    if (payloadLen > 0 && !ReceiveRawData(payload.data(), payloadLen)) {
-        return false;
-    }
-    
-    // Unmask payload if needed
-    if (masked) {
-        for (size_t i = 0; i < payload.size(); ++i) {
-            payload[i] ^= mask[i % 4];
-        }
-    }
-    
-    // Handle different frame types
-    if (opcode == 0x1) { // Text frame
-        if (compressed && m_compressionEnabled) {
-            // Decompress the payload
-            std::string decompressed;
-            if (DecompressMessage(payload, decompressed)) {
-                message = decompressed;
-            } else {
-                // Decompression failed, try as uncompressed
-                message = std::string(payload.begin(), payload.end());
-            }
-        } else {
-            message = std::string(payload.begin(), payload.end());
-        }
-        return true;
-    } else if (opcode == 0x8) { // Close frame
-        m_connected = false;
-        return false;
-    } else if (opcode == 0x9) { // Ping frame
-        // Send pong response
-        std::vector<uint8_t> pongFrame;
-        pongFrame.push_back(0x8A); // FIN + PONG opcode
-        pongFrame.push_back(0x80); // Masked, 0 length
-        // Add mask key
-        for (int i = 0; i < 4; ++i) {
-            pongFrame.push_back(0);
-        }
-        SendRawData(pongFrame.data(), pongFrame.size());
-        return false; // Don't process as message
-    }
-    
-    return false;
+    return ss.str();
 }
 
 bool ArchipelagoSocket::Connect(const std::string& host, uint16_t port, 
@@ -392,6 +226,224 @@ void ArchipelagoSocket::Disconnect() {
     Printf("Disconnected from Archipelago server\n");
 }
 
+bool ArchipelagoSocket::PerformWebSocketHandshake() {
+    std::string wsKey = GenerateWebSocketKey();
+    
+    // Build HTTP upgrade request
+    std::stringstream request;
+    request << "GET / HTTP/1.1\r\n";
+    request << "Host: " << m_host << ":" << m_port << "\r\n";
+    request << "Upgrade: websocket\r\n";
+    request << "Connection: Upgrade\r\n";
+    request << "Sec-WebSocket-Key: " << wsKey << "\r\n";
+    request << "Sec-WebSocket-Version: 13\r\n";
+    request << "\r\n";
+    
+    std::string requestStr = request.str();
+    
+    if (archipelago_debug) {
+        Printf("Sending WebSocket upgrade request\n");
+    }
+    
+    // Send upgrade request
+    if (!SendRawData(requestStr.c_str(), requestStr.length())) {
+        return false;
+    }
+    
+    // Read response with dynamic buffer
+    std::vector<char> buffer(RECV_BUFFER_SIZE);
+    std::string response;
+    
+    // Read until we have the complete HTTP headers
+    while (response.find("\r\n\r\n") == std::string::npos) {
+        int bytes = recv(m_socket, buffer.data(), buffer.size() - 1, 0);
+        if (bytes <= 0) {
+            m_lastError = "Failed to receive WebSocket upgrade response";
+            return false;
+        }
+        response.append(buffer.data(), bytes);
+    }
+    
+    if (archipelago_debug) {
+        Printf("WebSocket upgrade response received\n");
+    }
+    
+    // Check for successful upgrade
+    if (response.find("HTTP/1.1 101") == std::string::npos) {
+        m_lastError = "WebSocket upgrade failed";
+        return false;
+    }
+    
+    Printf(TEXTCOLOR_GREEN "WebSocket connection established!\n");
+    return true;
+}
+
+bool ArchipelagoSocket::SendWebSocketFrame(const std::string& message) {
+    std::vector<uint8_t> frame;
+    
+    // FIN = 1, RSV = 0, Opcode = TEXT (0x1)
+    frame.push_back(0x81);
+    
+    size_t len = message.length();
+    
+    // Payload length with mask bit set
+    if (len < 126) {
+        frame.push_back(0x80 | static_cast<uint8_t>(len));
+    } else if (len < 65536) {
+        frame.push_back(0x80 | 126);
+        frame.push_back((len >> 8) & 0xFF);
+        frame.push_back(len & 0xFF);
+    } else {
+        // Support 64-bit length
+        frame.push_back(0x80 | 127);
+        for (int i = 7; i >= 0; --i) {
+            frame.push_back((len >> (i * 8)) & 0xFF);
+        }
+    }
+    
+    // Masking key (required for client->server)
+    uint32_t maskKey = GenerateMaskingKey();
+    uint8_t mask[4];
+    mask[0] = (maskKey >> 24) & 0xFF;
+    mask[1] = (maskKey >> 16) & 0xFF;
+    mask[2] = (maskKey >> 8) & 0xFF;
+    mask[3] = maskKey & 0xFF;
+    
+    for (int i = 0; i < 4; ++i) {
+        frame.push_back(mask[i]);
+    }
+    
+    // Masked payload
+    for (size_t i = 0; i < message.length(); ++i) {
+        frame.push_back(message[i] ^ mask[i % 4]);
+    }
+    
+    // Send frame
+    return SendRawData(frame.data(), frame.size());
+}
+
+bool ArchipelagoSocket::ReceiveWebSocketFrame(std::string& message) {
+    message.clear();
+    
+    // Support for fragmented frames
+    bool finalFrame = false;
+    uint8_t firstOpcode = 0;
+    
+    while (!finalFrame) {
+        uint8_t header[2];
+        
+        // Read frame header
+        if (!ReceiveRawData(header, 2)) {
+            return false;
+        }
+        
+        finalFrame = (header[0] & 0x80) != 0;
+        uint8_t opcode = header[0] & 0x0F;
+        bool masked = (header[1] & 0x80) != 0;
+        
+        // Store first frame's opcode
+        if (firstOpcode == 0) {
+            firstOpcode = opcode;
+        }
+        
+        // Get payload length
+        uint64_t payloadLen = header[1] & 0x7F;
+        
+        // Extended payload length
+        if (payloadLen == 126) {
+            uint8_t extLen[2];
+            if (!ReceiveRawData(extLen, 2)) {
+                return false;
+            }
+            payloadLen = (static_cast<uint64_t>(extLen[0]) << 8) | extLen[1];
+        } else if (payloadLen == 127) {
+            // Support 64-bit length
+            uint8_t extLen[8];
+            if (!ReceiveRawData(extLen, 8)) {
+                return false;
+            }
+            payloadLen = 0;
+            for (int i = 0; i < 8; ++i) {
+                payloadLen = (payloadLen << 8) | extLen[i];
+            }
+            
+            // Sanity check
+            if (payloadLen > MAX_WEBSOCKET_PAYLOAD) {
+                m_lastError = "WebSocket frame too large";
+                return false;
+            }
+        }
+        
+        // Masking key (if present)
+        uint8_t mask[4] = {0};
+        if (masked) {
+            if (!ReceiveRawData(mask, 4)) {
+                return false;
+            }
+        }
+        
+        // Read payload in chunks for large messages
+        std::vector<uint8_t> payload(payloadLen);
+        size_t totalRead = 0;
+        
+        while (totalRead < payloadLen) {
+            size_t toRead = std::min(RECV_BUFFER_SIZE, payloadLen - totalRead);
+            if (!ReceiveRawData(payload.data() + totalRead, toRead)) {
+                return false;
+            }
+            totalRead += toRead;
+        }
+        
+        // Unmask payload if needed
+        if (masked) {
+            for (size_t i = 0; i < payload.size(); ++i) {
+                payload[i] ^= mask[i % 4];
+            }
+        }
+        
+        // Handle different frame types
+        if (opcode == 0x0) { // Continuation frame
+            message.append(payload.begin(), payload.end());
+        } else if (opcode == 0x1) { // Text frame
+            message.append(payload.begin(), payload.end());
+        } else if (opcode == 0x8) { // Close frame
+            m_connected = false;
+            return false;
+        } else if (opcode == 0x9) { // Ping frame
+            // Send pong response
+            SendPongFrame(payload);
+            continue; // Don't return, wait for next frame
+        } else if (opcode == 0xA) { // Pong frame
+            continue; // Ignore pongs
+        }
+    }
+    
+    return !message.empty();
+}
+
+bool ArchipelagoSocket::SendPongFrame(const std::vector<uint8_t>& pingData) {
+    std::vector<uint8_t> pongFrame;
+    pongFrame.push_back(0x8A); // FIN + PONG opcode
+    
+    if (pingData.size() < 126) {
+        pongFrame.push_back(0x80 | static_cast<uint8_t>(pingData.size()));
+    } else {
+        pongFrame.push_back(0x80 | 126);
+        pongFrame.push_back((pingData.size() >> 8) & 0xFF);
+        pongFrame.push_back(pingData.size() & 0xFF);
+    }
+    
+    // Add mask key
+    for (int i = 0; i < 4; ++i) {
+        pongFrame.push_back(0);
+    }
+    
+    // Add payload
+    pongFrame.insert(pongFrame.end(), pingData.begin(), pingData.end());
+    
+    return SendRawData(pongFrame.data(), pongFrame.size());
+}
+
 bool ArchipelagoSocket::SendHandshake() {
     // Create JSON handshake message for Archipelago
     std::stringstream json;
@@ -403,16 +455,18 @@ bool ArchipelagoSocket::SendHandshake() {
     json << "\"major\":0,\"minor\":6,\"build\":2,";  // Match server version
     json << "\"class\":\"Version\"";
     json << "},";
-    json << "\"tags\":[],";  // FIXED: Added the missing tags field
     json << "\"uuid\":\"selaco-" << GenerateUUID() << "\",";
-    json << "\"game\":\"Selaco\",";  // Specify Selaco as the game
+    json << "\"game\":\"Selaco\",";
+    json << "\"tags\":[],";  // Empty tags array - required by server
     json << "\"slot_data\":true,";
     json << "\"items_handling\":0";
     json << "}]";
     
     std::string jsonStr = json.str();
     
-    Printf("Sending Archipelago handshake: %s\n", jsonStr.c_str());
+    if (archipelago_debug) {
+        Printf("Sending Archipelago handshake\n");
+    }
     
     // Send as WebSocket text frame
     if (!SendWebSocketFrame(jsonStr)) {
@@ -427,16 +481,21 @@ bool ArchipelagoSocket::SendHandshake() {
 bool ArchipelagoSocket::ProcessHandshakeResponse() {
     Printf("Waiting for Archipelago handshake response...\n");
     
-    // Set a timeout
+    // Increase timeout for large messages
     #ifdef _WIN32
-        DWORD timeout = 10000; // 10 seconds
+        DWORD timeout = 30000; // 30 seconds
         setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
     #else
         struct timeval tv;
-        tv.tv_sec = 10;
+        tv.tv_sec = 30;
         tv.tv_usec = 0;
         setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     #endif
+    
+    // Also increase send buffer size for large messages
+    int bufSize = 256 * 1024; // 256KB
+    setsockopt(m_socket, SOL_SOCKET, SO_SNDBUF, (char*)&bufSize, sizeof(bufSize));
+    setsockopt(m_socket, SOL_SOCKET, SO_RCVBUF, (char*)&bufSize, sizeof(bufSize));
     
     std::string response;
     
@@ -447,27 +506,41 @@ bool ArchipelagoSocket::ProcessHandshakeResponse() {
     }
     
     if (archipelago_debug) {
-        Printf("Received: %s\n", response.c_str());
+        // Don't print raw response to avoid binary output
+        Printf("Received response (%zu bytes)\n", response.length());
     }
     
     // Check for RoomInfo (which we get first)
     if (response.find("\"cmd\":\"RoomInfo\"") != std::string::npos) {
         Printf("Received RoomInfo, waiting for Connected message...\n");
         
-        // Wait for Connected message
+        // Clear response and wait for Connected message
+        response.clear();
         if (!ReceiveWebSocketFrame(response)) {
             m_lastError = "Failed to receive Connected message";
             return false;
         }
         
         if (archipelago_debug) {
-            Printf("Received: %s\n", response.c_str());
+            Printf("Received Connected message (%zu bytes)\n", response.length());
         }
     }
     
     // Check response
     if (response.find("\"cmd\":\"Connected\"") != std::string::npos) {
         Printf(TEXTCOLOR_GREEN "Successfully connected to Archipelago as '%s'!\n", m_slotName.c_str());
+        
+        // Parse missing locations count if present
+        size_t locPos = response.find("\"missing_locations\":[");
+        if (locPos != std::string::npos) {
+            size_t endPos = response.find("]", locPos);
+            if (endPos != std::string::npos) {
+                std::string locStr = response.substr(locPos + 21, endPos - locPos - 21);
+                int locCount = std::count(locStr.begin(), locStr.end(), ',') + 1;
+                Printf("Missing locations: %d\n", locCount);
+            }
+        }
+        
         SetNonBlocking(true);
         return true;
     } else if (response.find("\"cmd\":\"ConnectionRefused\"") != std::string::npos) {
@@ -476,7 +549,7 @@ bool ArchipelagoSocket::ProcessHandshakeResponse() {
         return false;
     }
     
-    m_lastError = "Unexpected response: " + response;
+    m_lastError = "Unexpected response";
     return false;
 }
 
@@ -521,103 +594,53 @@ bool ArchipelagoSocket::HasPendingMessages() const {
     return !m_recvQueue.empty();
 }
 
-void ArchipelagoSocket::ReceiverThreadFunc() {
-    SetNonBlocking(true);
-    Printf("Receiver thread started\n");
-    
-    while (!m_shouldStop && m_connected) {
-        std::string message;
-        
-        if (ReceiveWebSocketFrame(message)) {
-            if (!message.empty()) {
-                // Parse and queue the message
-                ArchipelagoMessage msg;
-                if (ParseJsonMessage(message, msg)) {
-                    std::lock_guard<std::mutex> lock(m_recvMutex);
-                    m_recvQueue.push(msg);
-                }
-            }
-        }
-        
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    
-    Printf("Receiver thread ended\n");
-}
-
-bool ArchipelagoSocket::ParseJsonMessage(const std::string& json, ArchipelagoMessage& msg) {
-    // Simple JSON parsing for Archipelago messages
-    if (json.find("\"cmd\":\"Print\"") != std::string::npos || 
-        json.find("\"cmd\":\"PrintJSON\"") != std::string::npos) {
-        msg.type = ArchipelagoMessageType::PRINT;
-        msg.data = json;
-        return true;
-    } else if (json.find("\"cmd\":\"DataPackage\"") != std::string::npos) {
-        msg.type = ArchipelagoMessageType::DATA_PACKAGE;
-        msg.data = json;
-        return true;
-    } else if (json.find("\"cmd\":\"Connected\"") != std::string::npos) {
-        msg.type = ArchipelagoMessageType::CONNECTED;
-        msg.data = json;
-        return true;
-    } else if (json.find("\"cmd\":\"ConnectionRefused\"") != std::string::npos) {
-        msg.type = ArchipelagoMessageType::REJECTED;
-        msg.data = json;
-        return true;
-    } else if (json.find("\"cmd\":\"ReceivedItems\"") != std::string::npos) {
-        msg.type = ArchipelagoMessageType::DATA;
-        msg.data = json;
-        return true;
-    } else if (json.find("\"cmd\":\"RoomInfo\"") != std::string::npos) {
-        // Don't queue RoomInfo messages, they're handled during handshake
-        return false;
-    } else {
-        // Unknown message type, queue it anyway
-        msg.type = ArchipelagoMessageType::DATA;
-        msg.data = json;
-        return true;
-    }
-}
-
 bool ArchipelagoSocket::SendRawData(const void* data, size_t size) {
-    const char* ptr = static_cast<const char*>(data);
-    size_t sent = 0;
+    const char* buffer = static_cast<const char*>(data);
+    size_t totalSent = 0;
     
-    while (sent < size) {
-        int result = send(m_socket, ptr + sent, static_cast<int>(size - sent), 0);
-        if (result == SOCKET_ERROR) {
-            m_lastError = "Send failed";
+    while (totalSent < size) {
+        int sent = send(m_socket, buffer + totalSent, size - totalSent, 0);
+        if (sent <= 0) {
+            m_lastError = "Socket send error";
             return false;
         }
-        sent += result;
+        totalSent += sent;
     }
     
     return true;
 }
 
 bool ArchipelagoSocket::ReceiveRawData(void* data, size_t size) {
-    char* ptr = static_cast<char*>(data);
-    size_t received = 0;
+    uint8_t* buffer = static_cast<uint8_t*>(data);
+    size_t totalReceived = 0;
     
-    while (received < size) {
-        int result = recv(m_socket, ptr + received, static_cast<int>(size - received), 0);
-        if (result == SOCKET_ERROR) {
-#ifdef _WIN32
-            int error = WSAGetLastError();
-            if (error == WSAEWOULDBLOCK) {
-#else
-            if (errno == EWOULDBLOCK || errno == EAGAIN) {
-#endif
-                return false; // No data available
+    while (totalReceived < size) {
+        int received = recv(m_socket, reinterpret_cast<char*>(buffer + totalReceived), 
+                           size - totalReceived, 0);
+        
+        if (received <= 0) {
+            if (received == 0) {
+                m_lastError = "Connection closed by peer";
+            } else {
+                #ifdef _WIN32
+                    int err = WSAGetLastError();
+                    if (err == WSAEWOULDBLOCK && m_connected) {
+                        // Non-blocking mode, retry
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        continue;
+                    }
+                #else
+                    if (errno == EWOULDBLOCK && m_connected) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        continue;
+                    }
+                #endif
+                m_lastError = "Socket receive error";
             }
-            m_lastError = "Receive failed";
-            return false;
-        } else if (result == 0) {
-            // Connection closed
-            m_connected = false;
             return false;
         }
-        received += result;
+        
+        totalReceived += received;
     }
     
     return true;
@@ -644,102 +667,71 @@ std::string ArchipelagoSocket::GetConnectionInfo() const {
     
     std::stringstream ss;
     ss << "Connected to " << m_host << ":" << m_port;
-    ss << " as '" << m_slotName << "'";
     return ss.str();
 }
 
-std::string ArchipelagoSocket::GenerateUUID() {
-    // Simple UUID v4 generator
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 15);
-    std::uniform_int_distribution<> dis2(8, 11);
+void ArchipelagoSocket::ReceiverThreadFunc() {
+    SetNonBlocking(false); // Use blocking mode for receiver thread
+    Printf("Receiver thread started\n");
     
-    std::stringstream ss;
-    ss << std::hex;
+    // Increase thread-local timeout
+    #ifdef _WIN32
+        DWORD timeout = 100; // 100ms for checking m_shouldStop
+        setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+    #else
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000; // 100ms
+        setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    #endif
     
-    // Generate 32 hex characters with proper UUID v4 format
-    for (int i = 0; i < 32; ++i) {
-        if (i == 8 || i == 12 || i == 16 || i == 20) {
-            ss << "-";
-        }
-        if (i == 12) {
-            ss << "4";  // Version 4
-        } else if (i == 16) {
-            ss << dis2(gen);  // Variant
-        } else {
-            ss << dis(gen);
+    while (!m_shouldStop && m_connected) {
+        std::string message;
+        
+        if (ReceiveWebSocketFrame(message)) {
+            if (!message.empty()) {
+                // Parse and queue the message
+                ArchipelagoMessage msg;
+                if (ParseJsonMessage(message, msg)) {
+                    std::lock_guard<std::mutex> lock(m_recvMutex);
+                    m_recvQueue.push(msg);
+                }
+            }
         }
     }
     
-    return ss.str();
+    Printf("Receiver thread ended\n");
 }
 
-bool ArchipelagoSocket::CompressMessage(const std::string& input, std::vector<uint8_t>& output) {
-    if (!m_compressionEnabled) {
-        return false;
+bool ArchipelagoSocket::ParseJsonMessage(const std::string& json, ArchipelagoMessage& msg) {
+    // Simple JSON parsing for Archipelago messages
+    if (json.find("\"cmd\":\"Print\"") != std::string::npos || 
+        json.find("\"cmd\":\"PrintJSON\"") != std::string::npos) {
+        msg.type = ArchipelagoMessageType::PRINT;
+        msg.data = json;
+        return true;
     }
     
-    // Calculate worst-case output size
-    mz_ulong compressedSize = mz_compressBound(input.length());
-    output.resize(compressedSize);
-    
-    // Compress the data
-    int ret = mz_compress2(output.data(), &compressedSize, 
-                          (const unsigned char*)input.data(), input.length(),
-                          MZ_DEFAULT_COMPRESSION);
-    
-    if (ret != MZ_OK) {
-        return false;
+    if (json.find("\"cmd\":\"Connected\"") != std::string::npos) {
+        msg.type = ArchipelagoMessageType::CONNECTED;
+        msg.data = json;
+        return true;
     }
     
-    // Remove the zlib header (2 bytes) and trailer (4 bytes) for raw deflate
-    if (compressedSize > 6) {
-        output.erase(output.begin(), output.begin() + 2);
-        output.resize(compressedSize - 6);
-        return output.size() < input.length();
+    if (json.find("\"cmd\":\"ConnectionRefused\"") != std::string::npos) {
+        msg.type = ArchipelagoMessageType::REJECTED;
+        msg.data = json;
+        return true;
     }
     
-    return false;
-}
-
-bool ArchipelagoSocket::DecompressMessage(const std::vector<uint8_t>& input, std::string& output) {
-    if (!m_compressionEnabled || input.empty()) {
-        return false;
+    if (json.find("\"cmd\":\"ReceivedItems\"") != std::string::npos) {
+        msg.type = ArchipelagoMessageType::DATA;
+        msg.data = json;
+        return true;
     }
     
-    // Add zlib header for raw deflate stream
-    std::vector<uint8_t> zlibInput;
-    zlibInput.push_back(0x78); // CMF
-    zlibInput.push_back(0x9C); // FLG
-    zlibInput.insert(zlibInput.end(), input.begin(), input.end());
-    
-    // Add placeholder Adler-32 checksum (4 bytes)
-    zlibInput.push_back(0x00);
-    zlibInput.push_back(0x00);
-    zlibInput.push_back(0x00);
-    zlibInput.push_back(0x01);
-    
-    // Start with a reasonable buffer size
-    mz_ulong decompressedSize = input.size() * 4 + 1024;
-    std::vector<uint8_t> decompressed(decompressedSize);
-    
-    // Decompress
-    int ret = mz_uncompress(decompressed.data(), &decompressedSize,
-                           zlibInput.data(), zlibInput.size());
-    
-    if (ret == MZ_BUF_ERROR) {
-        // Buffer too small, try again with larger buffer
-        decompressedSize = input.size() * 8 + 4096;
-        decompressed.resize(decompressedSize);
-        ret = mz_uncompress(decompressed.data(), &decompressedSize,
-                           zlibInput.data(), zlibInput.size());
-    }
-    
-    if (ret != MZ_OK) {
-        return false;
-    }
-    
-    output.assign(decompressed.begin(), decompressed.begin() + decompressedSize);
+    // Default to PRINT for unknown messages
+    msg.type = ArchipelagoMessageType::PRINT;
+    msg.data = json;
     return true;
 }
