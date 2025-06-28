@@ -241,6 +241,8 @@ OptionMenu "OptionsMenu" protected
 	Submenu "$OPTMNU_SOUND",			"SoundOptions"
 	Submenu "$OPTMNU_DISPLAY",			"VideoOptions"
 	Submenu "$OPTMNU_VIDEO",			"VideoModeMenu"
+	StaticText "TEST - ARCHIPELAGO BELOW"   
+	Submenu "Archipelago",				"ArchipelagoOptions"
 	StaticText " "
 	Submenu "$OS_TITLE", "os_Menu"
 	Option "$OPTMNU_SIMPLEON",			"m_simpleoptions", "OnOff"
@@ -2712,4 +2714,37 @@ OptionValue "SpriteShadowModes"
 	0, "$OPTVAL_OFF"
 	1, "$OPTVAL_DEFAULT"
 	2, "$OPTVAL_SPRSHADALWAYS"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Archipelago Integration Menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue "ArchipelagoPortOptions"
+{
+    38281, "Default (38281)"
+    38282, "Alternative (38282)" 
+}
+
+OptionMenu "ArchipelagoOptions" protected
+{
+    Title "ARCHIPELAGO SETTINGS"
+    
+    StaticText " "
+    TextField "Server Host:", "archipelago_host"
+    NumberField "Server Port:", "archipelago_port", 1, 65535
+    TextField "Slot Name:", "archipelago_slot"
+    TextField "Password:", "archipelago_password"
+    
+    StaticText " "
+    Option "Auto-connect on startup", "archipelago_autoconnect", "YesNo"
+    Option "Debug messages", "archipelago_debug", "YesNo"
+    
+    StaticText " "
+    Command "Connect", "archipelago_connect"
+    Command "Disconnect", "archipelago_disconnect" 
+    Command "Status", "archipelago_status"
+    Command "Help", "archipelago_help"
 }

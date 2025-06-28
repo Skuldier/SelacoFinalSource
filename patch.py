@@ -1,71 +1,36 @@
-import asyncio
-import websockets
-import json
+#!/usr/bin/env python3
+"""
+Script to fix the Archipelago menu error by removing problematic AddOptionMenu calls
+"""
 
-async def test_archipelago_websocket(uri="ws://localhost:38281", slot_name="Skuldier"):
-    """Test Archipelago connection using WebSocket"""
-    
-    print(f"Connecting to {uri}")
-    
-    try:
-        async with websockets.connect(uri) as websocket:
-            print("Connected via WebSocket!")
-            
-            # Create handshake
-            handshake = [{
-                "cmd": "Connect",
-                "password": "",
-                "name": slot_name,
-                "version": {
-                    "major": 0,
-                    "minor": 4,
-                    "build": 5,
-                    "class": "Version"
-                },
-                "uuid": "test-client-12345",
-                "game": "",
-                "slot_data": True,
-                "items_handling": 0
-            }]
-            
-            handshake_json = json.dumps(handshake)
-            print(f"Sending: {handshake_json}")
-            
-            # Send handshake
-            await websocket.send(handshake_json)
-            
-            # Wait for response
-            print("Waiting for response...")
-            response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
-            
-            print(f"Received: {response}")
-            
-            # Parse response
-            resp_data = json.loads(response)
-            print(f"Parsed: {json.dumps(resp_data, indent=2)}")
-            
-    except asyncio.TimeoutError:
-        print("Response timed out")
-    except Exception as e:
-        print(f"Error: {type(e).__name__}: {e}")
+import sys
+import re
 
-# For Python without websockets library installed
-def test_http_endpoint():
-    """Test if server has HTTP endpoint"""
-    import urllib.request
-    try:
-        response = urllib.request.urlopen("http://localhost:38281")
-        print(f"HTTP Response: {response.read().decode()[:200]}...")
-    except Exception as e:
-        print(f"HTTP Error: {e}")
+def fix_menudef(filepath):
+    """Remove problematic AddOptionMenu entries that cause errors"""
+    
+    with open(filepath, 'r') as f:
+        content = f.read()
+    
+    # Pattern to find and remove MultiplayerOptions block
+    pattern = r'AddOptionMenu\s+"MultiplayerOptions"\s*\{[^}]*\}'
+    
+    # Remove the problematic section
+    fixed_content = re.sub(pattern, '', content, flags=re.DOTALL)
+    
+    # Also try to remove NetworkOptions if it causes issues
+    # Uncomment the next line if NetworkOptions also causes problems
+    # fixed_content = re.sub(r'AddOptionMenu\s+"NetworkOptions"\s*\{[^}]*\}', '', fixed_content, flags=re.DOTALL)
+    
+    # Write back
+    with open(filepath, 'w') as f:
+        f.write(fixed_content)
+    
+    print(f"Fixed {filepath}")
+    print("Removed problematic AddOptionMenu entries")
 
 if __name__ == "__main__":
-    print("=== Testing HTTP endpoint ===")
-    test_http_endpoint()
-    
-    print("\n=== Testing WebSocket ===")
-    try:
-        asyncio.run(test_archipelago_websocket())
-    except:
-        print("WebSocket test failed - install with: pip install websockets")
-        print("\nThis confirms Archipelago uses WebSocket protocol!")
+    if len(sys.argv) > 1:
+        fix_menudef(sys.argv[1])
+    else:
+        fix_menudef("wadsrc/static/menudef.txt")
