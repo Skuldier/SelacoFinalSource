@@ -4,23 +4,9 @@
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
+#include "archipelago_items.h"  // Need full definition of LocationCategory
 
 namespace Archipelago {
-
-// Forward declarations from archipelago_items.h
-struct ItemDef;
-enum class ItemCategory;
-enum class ItemFlag;
-
-// Location categories
-enum class LocationCategory {
-    ITEM_PICKUP,      // Standard item spawn
-    CABINET,          // Cabinet that requires keycard
-    SECRET,           // Secret area
-    SHOP,             // Workshop purchase
-    BOSS_REWARD,      // Boss kill reward
-    OBJECTIVE         // Objective completion
-};
 
 // Location definition with requirements
 struct LocationDef {
@@ -78,7 +64,8 @@ constexpr int LOC_SE_SAFE_START = 42000;
 
 // Example location definitions for SE_01A (Pathfinder Hospital)
 // In a real implementation, these would be generated from map analysis
-const std::vector<LocationDef> LOCATION_DEFINITIONS = {
+inline const std::vector<LocationDef>& GetLocationDefinitions() {
+    static const std::vector<LocationDef> LOCATION_DEFINITIONS = {
     // ===== SE_01A: Pathfinder Hospital =====
     // Main path items
     {10001, "Hospital Entrance - Health Pack", "SE_01A", LocationCategory::ITEM_PICKUP, 
@@ -140,6 +127,8 @@ const std::vector<LocationDef> LOCATION_DEFINITIONS = {
     {50003, "Workshop - Rifle Extended Mag", "SE_SAFE", LocationCategory::SHOP,
      false, 0, {}, 0, 3021}
 };
+    return LOCATION_DEFINITIONS;
+}
 
 // Helper structure for tracking location availability
 struct LocationAccess {
@@ -176,11 +165,11 @@ inline LocationAccess CheckLocationAccess(const LocationDef& location,
 
 // Get all accessible locations
 inline std::vector<const LocationDef*> GetAccessibleLocations(
-    const std::vector<LocationDef>& all_locations,
     const std::vector<int>& owned_items,
     int clearance_level,
     int cabinet_cards = 0) {
     
+    const auto& all_locations = GetLocationDefinitions();
     std::vector<const LocationDef*> accessible;
     
     for (size_t i = 0; i < all_locations.size(); ++i) {
@@ -202,9 +191,9 @@ inline std::vector<const LocationDef*> GetAccessibleLocations(
 
 // Get locations by map
 inline std::vector<const LocationDef*> GetLocationsByMap(
-    const std::vector<LocationDef>& all_locations,
     const std::string& map_name) {
     
+    const auto& all_locations = GetLocationDefinitions();
     std::vector<const LocationDef*> map_locations;
     
     for (size_t i = 0; i < all_locations.size(); ++i) {
@@ -225,13 +214,16 @@ struct ProgressionRule {
 };
 
 // Example progression rules
-const std::vector<ProgressionRule> PROGRESSION_RULES = {
-    {"Access Blue Wing", {1001}, {}},  // Purple keycard opens blue wing
-    {"Access Yellow Areas", {1002}, {}},  // Yellow keycard
-    {"Access Blue Areas", {1003}, {}},  // Blue keycard
-    {"Open Level 1 Doors", {1004}, {}},  // Security clearance level 1
-    {"Access Cabinets", {1005}, {}},  // Cabinet keycards
-    {"Destroy Barriers", {1006}, {}},  // Demolition charges
-};
+inline const std::vector<ProgressionRule>& GetProgressionRules() {
+    static const std::vector<ProgressionRule> PROGRESSION_RULES = {
+        {"Access Blue Wing", {1001}, {}},  // Purple keycard opens blue wing
+        {"Access Yellow Areas", {1002}, {}},  // Yellow keycard
+        {"Access Blue Areas", {1003}, {}},  // Blue keycard
+        {"Open Level 1 Doors", {1004}, {}},  // Security clearance level 1
+        {"Access Cabinets", {1005}, {}},  // Cabinet keycards
+        {"Destroy Barriers", {1006}, {}},  // Demolition charges
+    };
+    return PROGRESSION_RULES;
+}
 
 } // namespace Archipelago

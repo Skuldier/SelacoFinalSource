@@ -316,8 +316,9 @@ void SelacoArchipelago::LoadItemData() {
     // Load all item definitions
     m_items.clear();
     
-    for (size_t i = 0; i < ITEM_DEFINITIONS.size(); ++i) {
-        const ItemDef& item = ITEM_DEFINITIONS[i];
+    const auto& itemDefs = GetItemDefinitions();
+    for (size_t i = 0; i < itemDefs.size(); ++i) {
+        const ItemDef& item = itemDefs[i];
         m_items[item.id] = item;
     }
     
@@ -328,8 +329,9 @@ void SelacoArchipelago::LoadLocationData() {
     // Load all location definitions
     m_locations.clear();
     
-    for (size_t i = 0; i < LOCATION_DEFINITIONS.size(); ++i) {
-        const LocationDef& location = LOCATION_DEFINITIONS[i];
+    const auto& locationDefs = GetLocationDefinitions();
+    for (size_t i = 0; i < locationDefs.size(); ++i) {
+        const LocationDef& location = locationDefs[i];
         m_locations[location.id] = location;
     }
     
