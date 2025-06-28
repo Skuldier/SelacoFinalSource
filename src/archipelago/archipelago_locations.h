@@ -3,9 +3,24 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include "archipelago_items.h"
+#include <algorithm>
 
 namespace Archipelago {
+
+// Forward declarations from archipelago_items.h
+struct ItemDef;
+enum class ItemCategory;
+enum class ItemFlag;
+
+// Location categories
+enum class LocationCategory {
+    ITEM_PICKUP,      // Standard item spawn
+    CABINET,          // Cabinet that requires keycard
+    SECRET,           // Secret area
+    SHOP,             // Workshop purchase
+    BOSS_REWARD,      // Boss kill reward
+    OBJECTIVE         // Objective completion
+};
 
 // Location definition with requirements
 struct LocationDef {
@@ -123,9 +138,7 @@ const std::vector<LocationDef> LOCATION_DEFINITIONS = {
     {50002, "Workshop - Shotgun Choke", "SE_SAFE", LocationCategory::SHOP,
      false, 0, {}, 0, 3011},
     {50003, "Workshop - Rifle Extended Mag", "SE_SAFE", LocationCategory::SHOP,
-     false, 0, {}, 0, 3021},
-    
-    // Add more locations as needed...
+     false, 0, {}, 0, 3021}
 };
 
 // Helper structure for tracking location availability
@@ -150,7 +163,8 @@ inline LocationAccess CheckLocationAccess(const LocationDef& location,
     }
     
     // Check item requirements
-    for (int required_item : location.required_items) {
+    for (size_t i = 0; i < location.required_items.size(); ++i) {
+        int required_item = location.required_items[i];
         if (std::find(owned_items.begin(), owned_items.end(), required_item) == owned_items.end()) {
             access.accessible = false;
             access.missing_items.push_back(required_item);
@@ -169,7 +183,8 @@ inline std::vector<const LocationDef*> GetAccessibleLocations(
     
     std::vector<const LocationDef*> accessible;
     
-    for (const auto& location : all_locations) {
+    for (size_t i = 0; i < all_locations.size(); ++i) {
+        const LocationDef& location = all_locations[i];
         auto access = CheckLocationAccess(location, owned_items, clearance_level);
         
         // Special check for cabinets
@@ -192,7 +207,8 @@ inline std::vector<const LocationDef*> GetLocationsByMap(
     
     std::vector<const LocationDef*> map_locations;
     
-    for (const auto& location : all_locations) {
+    for (size_t i = 0; i < all_locations.size(); ++i) {
+        const LocationDef& location = all_locations[i];
         if (location.map_name == map_name) {
             map_locations.push_back(&location);
         }

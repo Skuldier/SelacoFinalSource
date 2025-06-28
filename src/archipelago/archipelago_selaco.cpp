@@ -8,6 +8,7 @@
 #include <memory>
 #include <algorithm>
 #include <sstream>
+#include <random>
 
 namespace Archipelago {
 
@@ -315,7 +316,8 @@ void SelacoArchipelago::LoadItemData() {
     // Load all item definitions
     m_items.clear();
     
-    for (const auto& item : ITEM_DEFINITIONS) {
+    for (size_t i = 0; i < ITEM_DEFINITIONS.size(); ++i) {
+        const ItemDef& item = ITEM_DEFINITIONS[i];
         m_items[item.id] = item;
     }
     
@@ -326,7 +328,8 @@ void SelacoArchipelago::LoadLocationData() {
     // Load all location definitions
     m_locations.clear();
     
-    for (const auto& location : LOCATION_DEFINITIONS) {
+    for (size_t i = 0; i < LOCATION_DEFINITIONS.size(); ++i) {
+        const LocationDef& location = LOCATION_DEFINITIONS[i];
         m_locations[location.id] = location;
     }
     
@@ -368,13 +371,14 @@ void SelacoArchipelago::CMD_ListLocations(const std::string& map_name) {
     
     Printf("Locations in %s:\n", map_name.c_str());
     
-    for (const auto& [id, loc] : g_archipelago->m_locations) {
+    for (const auto& pair : g_archipelago->m_locations) {
+        const LocationDef& loc = pair.second;
         if (loc.map_name == map_name || map_name.empty()) {
             bool checked = std::find(g_archipelago->m_checked_locations.begin(),
-                                   g_archipelago->m_checked_locations.end(), id)
+                                   g_archipelago->m_checked_locations.end(), pair.first)
                           != g_archipelago->m_checked_locations.end();
             
-            Printf("  %d: %s %s\n", id, loc.name.c_str(), 
+            Printf("  %d: %s %s\n", pair.first, loc.name.c_str(), 
                    checked ? TEXTCOLOR_GREEN "[CHECKED]" : "");
         }
     }

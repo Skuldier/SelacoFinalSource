@@ -40,32 +40,24 @@ struct ItemDef {
     int max_quantity;
 };
 
-// Location definition structure  
-struct LocationDef {
-    int id;
-    std::string name;
-    std::string map_name;
-    std::string internal_tag;
-    bool is_secret;
-    bool requires_clearance;
-    int clearance_level;
-};
+// Forward declaration - full definition is in archipelago_locations.h
+struct LocationDef;
 
 // Item definitions
 const std::vector<ItemDef> ITEM_DEFINITIONS = {
     // ===== PROGRESSION ITEMS =====
     {1001, "Purple Keycard", "OMNI_PURPLECARD", ItemCategory::PROGRESSION, 
-     (int)ItemFlag::ESSENTIAL | (int)ItemFlag::PROGRESSION, 1},
+     static_cast<int>(ItemFlag::ESSENTIAL) | static_cast<int>(ItemFlag::PROGRESSION), 1},
     {1002, "Yellow Keycard", "OMNI_YELLOWCARD", ItemCategory::PROGRESSION,
-     (int)ItemFlag::ESSENTIAL | (int)ItemFlag::PROGRESSION, 1},
+     static_cast<int>(ItemFlag::ESSENTIAL) | static_cast<int>(ItemFlag::PROGRESSION), 1},
     {1003, "Blue Keycard", "OMNI_BLUECARD", ItemCategory::PROGRESSION,
-     (int)ItemFlag::ESSENTIAL | (int)ItemFlag::PROGRESSION, 1},
+     static_cast<int>(ItemFlag::ESSENTIAL) | static_cast<int>(ItemFlag::PROGRESSION), 1},
     {1004, "Security Clearance Upgrade", "SecurityCard", ItemCategory::PROGRESSION,
-     (int)ItemFlag::ESSENTIAL | (int)ItemFlag::PROGRESSION | (int)ItemFlag::UPGRADE_ITEM, 7},
+     static_cast<int>(ItemFlag::ESSENTIAL) | static_cast<int>(ItemFlag::PROGRESSION) | static_cast<int>(ItemFlag::UPGRADE_ITEM), 7},
     {1005, "Cabinet Keycard", "CabinetCard", ItemCategory::PROGRESSION,
-     (int)ItemFlag::ESSENTIAL, 6},
+     static_cast<int>(ItemFlag::ESSENTIAL), 6},
     {1006, "Demolition Charges", "DEMOLITIONCHARGE_PICKUP", ItemCategory::PROGRESSION,
-     (int)ItemFlag::ESSENTIAL, 1},
+     static_cast<int>(ItemFlag::ESSENTIAL), 1},
 
     // ===== WEAPON PICKUPS =====
     {2001, "Roaring Cricket", "RoaringCricketPickup", ItemCategory::WEAPON, 0, 1},
@@ -85,15 +77,15 @@ const std::vector<ItemDef> ITEM_DEFINITIONS = {
     {3002, "Cricket: Knockback", "UpgradeCricketKnockback", ItemCategory::WEAPON_UPGRADE,
      (int)ItemFlag::UPGRADE_ITEM, 1},
     {3003, "Cricket: Hair Trigger", "UpgradeCricketHairTrigger", ItemCategory::WEAPON_UPGRADE,
-     (int)ItemFlag::UPGRADE_ITEM, 1},
+     static_cast<int>(ItemFlag::UPGRADE_ITEM), 1},
     {3004, "Cricket: Headshot Damage", "UpgradeCricketHeadshotDamage", ItemCategory::WEAPON_UPGRADE,
-     (int)ItemFlag::UPGRADE_ITEM, 1},
+     static_cast<int>(ItemFlag::UPGRADE_ITEM), 1},
     {3005, "Cricket: Recoil Dampener", "UpgradeCricketRecoil", ItemCategory::WEAPON_UPGRADE,
-     (int)ItemFlag::UPGRADE_ITEM, 1},
+     static_cast<int>(ItemFlag::UPGRADE_ITEM), 1},
     {3006, "Cricket: Impact", "UpgradeCricketImpact", ItemCategory::WEAPON_UPGRADE,
-     (int)ItemFlag::UPGRADE_ITEM, 1},
+     static_cast<int>(ItemFlag::UPGRADE_ITEM), 1},
     {3007, "Cricket: Splash Damage", "UpgradeCricketSplashDamage", ItemCategory::WEAPON_UPGRADE,
-     (int)ItemFlag::UPGRADE_ITEM, 1},
+     static_cast<int>(ItemFlag::UPGRADE_ITEM), 1},
 
     // Shotgun Upgrades
     {3010, "Shotgun: Incendiary Shells", "UpgradeShotgunIncendiary", ItemCategory::WEAPON_UPGRADE,
@@ -294,7 +286,7 @@ enum class LocationCategory {
 
 // Helper functions
 inline bool HasFlag(const ItemDef& item, ItemFlag flag) {
-    return (item.flags & (int)flag) != 0;
+    return (item.flags & static_cast<int>(flag)) != 0;
 }
 
 inline bool IsProgressionItem(const ItemDef& item) {

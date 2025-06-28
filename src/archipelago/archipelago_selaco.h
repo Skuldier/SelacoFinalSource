@@ -5,16 +5,14 @@
 #include <unordered_map>
 #include <string>
 #include <random>
+#include "archipelago_items.h"
+#include "archipelago_locations.h"
 
 // Forward declarations
 class ArchipelagoSocket;
 struct ArchipelagoMessage;
 
 namespace Archipelago {
-
-// Forward declarations from other headers
-struct ItemDef;
-struct LocationDef;
 
 class SelacoArchipelago {
 public:
