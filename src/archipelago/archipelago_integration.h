@@ -3,17 +3,10 @@
 // Main header for Archipelago integration into Selaco
 // Include this in your main game loop and initialization code
 
-// Initialize the Archipelago system
-// Call this during game startup (e.g., in D_DoomMain or similar)
-void Archipelago_Init();
-
-// Shutdown the Archipelago system
-// Call this during game shutdown
-void Archipelago_Shutdown();
-
-// Process incoming Archipelago messages
-// Call this every frame or tick in your main game loop
-void Archipelago_ProcessMessages();
+// Forward declarations for d_main.cpp
+extern void Archipelago_Init();
+extern void Archipelago_Shutdown();
+extern void Archipelago_ProcessMessages();
 
 // Optional: Register Archipelago-specific game events
 // These would be implemented based on your game's specific needs

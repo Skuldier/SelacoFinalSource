@@ -120,6 +120,7 @@
 #include "shiftstate.h"
 #include "s_loader.h"
 #include "fs_findfile.h"
+#include "archipelago/archipelago_integration.h"
 
 #include "statdb.h"
 
@@ -155,7 +156,7 @@ void DrawHUD();
 void D_DoAnonStats();
 void I_DetectOS();
 void UpdateGenericUI(bool cvar);
-void Local_Job_Init();
+extern void Local_Job_Init();
 
 // MACROS ------------------------------------------------------------------
 
@@ -186,7 +187,7 @@ void InitWidgetResources(const char* basewad);
 
 bool D_CheckNetGame ();
 void D_ProcessEvents ();
-				Archipelago_ProcessMessages();
+void Archipelago_ProcessMessages();
 void G_BuildTiccmd (ticcmd_t* cmd);
 void D_DoAdvanceDemo ();
 void D_LoadWadSettings ();
