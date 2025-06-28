@@ -366,6 +366,7 @@ bool ArchipelagoSocket::SendHandshake() {
     json << "\"major\":0,\"minor\":6,\"build\":2,";  // Match server version
     json << "\"class\":\"Version\"";
     json << "},";
+    json << "\"tags\":[],";  // FIXED: Added the missing tags field
     json << "\"uuid\":\"selaco-" << GenerateUUID() << "\",";
     json << "\"game\":\"Selaco\",";  // Specify Selaco as the game
     json << "\"slot_data\":true,";
