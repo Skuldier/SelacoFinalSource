@@ -6,7 +6,7 @@
 #include <sstream>
 
 // Global Archipelago socket instance
-static std::unique_ptr<ArchipelagoSocket> g_archipelagoSocket;
+std::unique_ptr<ArchipelagoSocket> g_archipelagoSocket;
 
 // CVars for Archipelago settings
 CVAR(String, archipelago_host, "localhost", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -116,54 +116,41 @@ CCMD(archipelago_connect) {
     // Parse arguments
     if (argv.argc() >= 2) {
         slot = argv[1];
+    } else if (slot.empty()) {
+        Printf("Usage: archipelago_connect <slot_name> [host:port] [password]\n");
+        Printf("  or set archipelago_slot CVAR and use: archipelago_connect\n");
+        return;
     }
     
+    // Parse host:port if provided
     if (argv.argc() >= 3) {
-        // Parse host:port
         std::string hostPort = argv[2];
         size_t colonPos = hostPort.find(':');
-        
         if (colonPos != std::string::npos) {
             host = hostPort.substr(0, colonPos);
-            port = static_cast<uint16_t>(std::stoi(hostPort.substr(colonPos + 1)));
+            port = static_cast<uint16_t>(atoi(hostPort.substr(colonPos + 1).c_str()));
         } else {
             host = hostPort;
         }
     }
     
+    // Parse password if provided
     if (argv.argc() >= 4) {
         password = argv[3];
-    }
-    
-    // Validate slot name
-    if (slot.empty()) {
-        Printf(TEXTCOLOR_RED "Error: Slot name is required!\n");
-        Printf("Usage: archipelago_connect <slot_name> [host:port] [password]\n");
-        Printf("   or: set archipelago_slot and use archipelago_connect\n");
-        return;
     }
     
     Printf("Connecting to %s:%d as '%s'...\n", host.c_str(), port, slot.c_str());
     
     if (g_archipelagoSocket->Connect(host, port, slot, password)) {
-        // Save successful connection info
-        archipelago_host = host.c_str();
-        archipelago_port = port;
-        archipelago_slot = slot.c_str();
-        archipelago_password = password.c_str();
+        Printf(TEXTCOLOR_GREEN "Connection initiated\n");
     } else {
-        Printf(TEXTCOLOR_RED "Failed to connect: %s\n", 
+        Printf(TEXTCOLOR_RED "Connection failed: %s\n", 
                g_archipelagoSocket->GetLastError().c_str());
     }
 }
 
 CCMD(archipelago_disconnect) {
-    if (!g_archipelagoSocket) {
-        Printf("Archipelago system not initialized\n");
-        return;
-    }
-    
-    if (!g_archipelagoSocket->IsConnected()) {
+    if (!g_archipelagoSocket || !g_archipelagoSocket->IsConnected()) {
         Printf("Not connected to Archipelago server\n");
         return;
     }
@@ -174,20 +161,23 @@ CCMD(archipelago_disconnect) {
 
 CCMD(archipelago_status) {
     if (!g_archipelagoSocket) {
-        Printf("Archipelago system not initialized\n");
+        Printf("Archipelago socket not initialized\n");
         return;
     }
     
     if (g_archipelagoSocket->IsConnected()) {
-        Printf("Status: %s\n", g_archipelagoSocket->GetConnectionInfo().c_str());
-        Printf("Slot: %s\n", g_archipelagoSocket->GetSlotName().c_str());
+        Printf(TEXTCOLOR_GREEN "Status: Connected\n");
+        Printf("  %s\n", g_archipelagoSocket->GetConnectionInfo().c_str());
     } else {
-        Printf("Status: Not connected\n");
-        if (strlen(archipelago_slot) > 0) {
-            Printf("Configured slot: %s\n", (const char*)archipelago_slot);
-        }
-        Printf("Use 'archipelago_connect <slot_name>' to connect\n");
+        Printf(TEXTCOLOR_ORANGE "Status: Not connected\n");
+        Printf("  Default server: %s:%d\n", (const char*)archipelago_host, (int)archipelago_port);
+        Printf("  Default slot: %s\n", 
+               strlen(archipelago_slot) > 0 ? (const char*)archipelago_slot : "<not set>");
     }
+    
+    Printf("\nSettings:\n");
+    Printf("  Auto-connect: %s\n", archipelago_autoconnect ? "enabled" : "disabled");
+    Printf("  Debug mode: %s\n", archipelago_debug ? "enabled" : "disabled");
 }
 
 CCMD(archipelago_setslot) {
@@ -239,20 +229,28 @@ CCMD(archipelago_debug) {
 
 // Help command
 CCMD(archipelago_help) {
-    Printf("Archipelago Commands:\n");
+    Printf("=== Archipelago Commands ===\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_connect <slot_name> [host:port] [password]\n");
-    Printf("    - Connect to server with specified slot name\n");
+    Printf("    Connect to server with specified slot name\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_disconnect\n");
-    Printf("    - Disconnect from server\n");
+    Printf("    Disconnect from server\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_status\n");
-    Printf("    - Show connection status\n");
+    Printf("    Show connection status\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_setslot <slot_name>\n");
-    Printf("    - Set default slot name\n");
+    Printf("    Set default slot name\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_send <message>\n");
-    Printf("    - Send a test message\n");
+    Printf("    Send a test message\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_debug\n");
-    Printf("    - Toggle debug mode\n");
-    Printf("\nCVars:\n");
+    Printf("    Toggle debug mode\n");
+    Printf(TEXTCOLOR_GOLD "  archipelago_listitems\n");
+    Printf("    List all available items\n");
+    Printf(TEXTCOLOR_GOLD "  archipelago_listlocations\n");
+    Printf("    List all available locations\n");
+    Printf(TEXTCOLOR_GOLD "  archipelago_testitem <item_id>\n");
+    Printf("    Test receiving an item\n");
+    Printf(TEXTCOLOR_GOLD "  archipelago_testlocation <location_id>\n");
+    Printf("    Test checking a location\n");
+    Printf("\n=== CVars ===\n");
     Printf("  archipelago_host - Server hostname (current: %s)\n", 
            (const char*)archipelago_host);
     Printf("  archipelago_port - Server port (current: %d)\n", 

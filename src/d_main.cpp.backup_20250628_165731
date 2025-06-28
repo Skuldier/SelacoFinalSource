@@ -127,7 +127,7 @@
 
 #ifdef __unix__
 #include "i_system.h"
-
+#include "archipelago/archipelago_integration.h"  // for SHARE_DIR
 #endif // __unix__
 
 using namespace FileSys;
@@ -4115,9 +4115,6 @@ void D_Cleanup()
 	DeinitSWColorMaps();
 	FreeSBarInfoScript();
 	DeleteScreenJob();
-	
-	// Shutdown Archipelago
-	Archipelago_Shutdown();
 
 	// clean up game state
 	D_ErrorCleanup ();

@@ -7,6 +7,7 @@
 #include <mutex>
 #include <atomic>
 #include <cstdint>
+#include <set>
 
 #ifdef _WIN32
     #include <winsock2.h>

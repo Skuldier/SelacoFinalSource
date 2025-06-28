@@ -11,7 +11,7 @@ extern void Archipelago_ProcessMessages();
 // Optional: Register Archipelago-specific game events
 // These would be implemented based on your game's specific needs
 namespace ArchipelagoEvents {
-    // Example event handlers - implement as needed
+    // Event handlers - implement in archipelago_selaco.cpp
     void OnItemReceived(int itemId, const char* itemName);
     void OnLocationChecked(int locationId, const char* locationName);
     void OnGoalCompleted(int goalId);
@@ -32,3 +32,9 @@ namespace ArchipelagoEvents {
 //    Archipelago_Shutdown();
 //
 // 4. Console commands are automatically registered
+//
+// 5. To check a location in your game code:
+//    ArchipelagoEvents::OnLocationChecked(locationId, locationName);
+//
+// 6. Items will be automatically received and processed
+//    through the message processing system

@@ -1,475 +1,536 @@
-#include "archipelago_selaco.h"
-#include "archipelago_socket.h"
 #include "archipelago_items.h"
-#include "archipelago_locations.h"
+#include "archipelago_integration.h"
+#include "archipelago_socket.h"
+#include "doomtype.h"
 #include "c_dispatch.h"
 #include "c_cvars.h"
-#include "doomtype.h"
-#include <memory>
-#include <algorithm>
-#include <sstream>
-#include <random>
+#include "g_game.h"
+#include "p_local.h"
+#include "gi.h"
+#include "a_pickups.h"
+#include "a_weapons.h"
+#include "a_keys.h"
+#include "p_acs.h"
 
-namespace Archipelago {
+using namespace Archipelago;
 
-// Singleton instance
-static std::unique_ptr<SelacoArchipelago> g_archipelago;
+// External references
+extern std::unique_ptr<ArchipelagoSocket> g_archipelagoSocket;
+EXTERN_CVAR(Bool, archipelago_debug)
 
-// CVars
-CVAR(Bool, archipelago_enabled, false, CVAR_ARCHIVE)
-CVAR(Bool, archipelago_deathlink, false, CVAR_ARCHIVE)
-CVAR(Bool, archipelago_goal_completion, false, CVAR_ARCHIVE)
+// Track received items to prevent duplicates
+static std::set<int64_t> g_receivedItems;
+static std::set<int64_t> g_checkedLocations;
 
-SelacoArchipelago::SelacoArchipelago() 
-    : m_socket(std::make_unique<ArchipelagoSocket>()),
-      m_connected(false),
-      m_clearance_level(0),
-      m_cabinet_cards(0) {
-}
+// Implementation of Archipelago event handlers
+namespace ArchipelagoEvents {
 
-SelacoArchipelago::~SelacoArchipelago() {
-    Disconnect();
-}
-
-bool SelacoArchipelago::Initialize() {
-    if (!archipelago_enabled) {
-        return false;
-    }
-    
-    Printf("Initializing Archipelago integration for Selaco...\n");
-    
-    // Load item and location data
-    LoadItemData();
-    LoadLocationData();
-    
-    return true;
-}
-
-void SelacoArchipelago::Shutdown() {
-    Disconnect();
-    m_items.clear();
-    m_locations.clear();
-    m_checked_locations.clear();
-    m_received_items.clear();
-}
-
-bool SelacoArchipelago::Connect(const std::string& host, uint16_t port, 
-                               const std::string& slot_name, const std::string& password) {
-    if (m_connected) {
-        Printf("Already connected to Archipelago\n");
-        return false;
-    }
-    
-    if (!m_socket->Connect(host, port, slot_name, password)) {
-        Printf(TEXTCOLOR_RED "Failed to connect to Archipelago: %s\n", 
-               m_socket->GetLastError().c_str());
-        return false;
-    }
-    
-    m_connected = true;
-    m_slot_name = slot_name;
-    
-    // Send initial connection data
-    SendConnectPacket();
-    
-    return true;
-}
-
-void SelacoArchipelago::Disconnect() {
-    if (!m_connected) {
-        return;
-    }
-    
-    m_socket->Disconnect();
-    m_connected = false;
-}
-
-void SelacoArchipelago::ProcessMessages() {
-    if (!m_connected) {
-        return;
-    }
-    
-    ArchipelagoMessage msg;
-    while (m_socket->ReceiveMessage(msg)) {
-        HandleMessage(msg);
-    }
-}
-
-void SelacoArchipelago::HandleMessage(const ArchipelagoMessage& msg) {
-    // Parse JSON message and handle different command types
-    // This is simplified - real implementation would use a JSON parser
-    
-    std::string data = msg.data;
-    
-    if (data.find("\"cmd\":\"ReceivedItems\"") != std::string::npos) {
-        HandleReceivedItems(data);
-    }
-    else if (data.find("\"cmd\":\"LocationInfo\"") != std::string::npos) {
-        HandleLocationInfo(data);
-    }
-    else if (data.find("\"cmd\":\"RoomUpdate\"") != std::string::npos) {
-        HandleRoomUpdate(data);
-    }
-    else if (data.find("\"cmd\":\"PrintJSON\"") != std::string::npos) {
-        HandlePrintJSON(data);
-    }
-    else if (data.find("\"cmd\":\"DataPackage\"") != std::string::npos) {
-        HandleDataPackage(data);
-    }
-    else if (archipelago_deathlink && data.find("\"cmd\":\"Bounce\"") != std::string::npos 
-             && data.find("\"DeathLink\"") != std::string::npos) {
-        HandleDeathLink(data);
-    }
-}
-
-void SelacoArchipelago::CheckLocation(int location_id) {
-    // Check if already checked
-    if (std::find(m_checked_locations.begin(), m_checked_locations.end(), location_id) 
-        != m_checked_locations.end()) {
-        return;
-    }
-    
-    // Add to checked locations
-    m_checked_locations.push_back(location_id);
-    
-    // Find location info
-    auto it = m_locations.find(location_id);
-    if (it != m_locations.end()) {
-        Printf(TEXTCOLOR_GREEN "Location checked: %s\n", it->second.name.c_str());
-    }
-    
-    // Send location check to server
-    SendLocationCheck(location_id);
-}
-
-void SelacoArchipelago::ReceiveItem(int item_id, int sender_slot) {
-    // Find item info
-    auto it = m_items.find(item_id);
-    if (it == m_items.end()) {
-        Printf(TEXTCOLOR_RED "Unknown item received: %d\n", item_id);
-        return;
-    }
-    
-    const ItemDef& item = it->second;
-    m_received_items.push_back(item_id);
-    
-    Printf(TEXTCOLOR_GOLD "Received %s from slot %d\n", item.name.c_str(), sender_slot);
-    
-    // Give the item to the player
-    GiveItemToPlayer(item);
-}
-
-void SelacoArchipelago::GiveItemToPlayer(const ItemDef& item) {
-    // This would interface with Selaco's inventory system
-    std::stringstream cmd;
-    
-    // Special handling for different item types
-    switch (item.category) {
-        case ItemCategory::PROGRESSION:
-            if (item.internal_name == "SecurityCard") {
-                m_clearance_level++;
-                cmd << "give ClearanceLevel 1";
-            } else if (item.internal_name == "CabinetCard") {
-                m_cabinet_cards++;
-                cmd << "give CabinetCardCount 1";
-            } else {
-                cmd << "give " << item.internal_name << " 1";
-            }
-            break;
-            
-        case ItemCategory::WEAPON:
-            cmd << "give " << item.internal_name << " 1";
-            break;
-            
-        case ItemCategory::WEAPON_UPGRADE:
-            // Weapon upgrades need special handling
-            cmd << "give " << item.internal_name << " 1";
-            cmd << "; archipelago_enable_upgrade " << item.internal_name;
-            break;
-            
-        case ItemCategory::HEALTH:
-        case ItemCategory::ARMOR:
-        case ItemCategory::AMMO:
-        case ItemCategory::CONSUMABLE:
-            if (item.max_quantity > 1) {
-                // For stackable items, give a reasonable amount
-                int amount = GetAmountForItem(item);
-                cmd << "give " << item.internal_name << " " << amount;
-            } else {
-                cmd << "give " << item.internal_name << " 1";
-            }
-            break;
-            
-        default:
-            cmd << "give " << item.internal_name << " 1";
-            break;
-    }
-    
-    // Execute the give command
-    C_DoCommand(cmd.str().c_str());
-}
-
-int SelacoArchipelago::GetAmountForItem(const ItemDef& item) {
-    // Determine appropriate amounts for different item types
-    switch (item.id) {
-        // Health
-        case 5001: return 10;  // Small health
-        case 5002: return 25;  // Large health
-        case 5003: return 100; // Ultra health
-        
-        // Armor  
-        case 6001: return 25;  // Light armor
-        case 6002: return 50;  // Combat armor
-        case 6003: return 75;  // Heavy armor
-        case 6004: return 100; // Admiral armor
-        case 6005: return 5;   // Armor shard
-        
-        // Ammo - give roughly half a magazine
-        case 7001: return 9;   // Pistol ammo
-        case 7002: return 4;   // Shotgun small
-        case 7003: return 8;   // Shotgun medium
-        case 7004: return 20;  // Shotgun large
-        case 7005: return 15;  // Rifle small
-        case 7006: return 30;  // Rifle medium
-        case 7007: return 60;  // Rifle large
-        case 7008: return 2;   // Grenade ammo
-        case 7009: return 20;  // Nailgun small
-        case 7010: return 50;  // Nailgun medium
-        case 7011: return 10;  // DMR ammo
-        case 7012: return 35;  // Plasma small
-        case 7013: return 70;  // Plasma large
-        case 7014: return 2;   // Railgun slug
-        
-        // Consumables
-        case 9001: return 5;   // Credits small
-        case 9002: return 25;  // Credits medium
-        case 9003: return 100; // Credits large
-        case 9004: return 15;  // Weapon parts
-        
-        default: return 1;
-    }
-}
-
-void SelacoArchipelago::SendLocationCheck(int location_id) {
-    if (!m_connected) return;
-    
-    std::stringstream json;
-    json << "[{";
-    json << "\"cmd\":\"LocationChecks\",";
-    json << "\"locations\":[" << location_id << "]";
-    json << "}]";
-    
-    ArchipelagoMessage msg;
-    msg.type = ArchipelagoMessageType::DATA;
-    msg.data = json.str();
-    
-    m_socket->SendMessage(msg);
-}
-
-void SelacoArchipelago::SendConnectPacket() {
-    if (!m_connected) return;
-    
-    std::stringstream json;
-    json << "[{";
-    json << "\"cmd\":\"Connect\",";
-    json << "\"game\":\"Selaco\",";
-    json << "\"name\":\"" << m_slot_name << "\",";
-    json << "\"uuid\":\"" << GenerateUUID() << "\",";
-    json << "\"version\":{\"major\":0,\"minor\":1,\"build\":0},";
-    json << "\"items_handling\":0b111,";  // All items handling
-    json << "\"tags\":[\"AP\"]";
-    
-    if (archipelago_deathlink) {
-        json << ",\"slot_data\":{\"death_link\":true}";
-    }
-    
-    json << "}]";
-    
-    ArchipelagoMessage msg;
-    msg.type = ArchipelagoMessageType::DATA;
-    msg.data = json.str();
-    
-    m_socket->SendMessage(msg);
-}
-
-void SelacoArchipelago::SendDeathLink(const std::string& cause) {
-    if (!m_connected || !archipelago_deathlink) return;
-    
-    std::stringstream json;
-    json << "[{";
-    json << "\"cmd\":\"Bounce\",";
-    json << "\"data\":{";
-    json << "\"type\":\"DeathLink\",";
-    json << "\"cause\":\"" << cause << "\",";
-    json << "\"source\":\"" << m_slot_name << "\"";
-    json << "}";
-    json << "}]";
-    
-    ArchipelagoMessage msg;
-    msg.type = ArchipelagoMessageType::DATA;
-    msg.data = json.str();
-    
-    m_socket->SendMessage(msg);
-}
-
-void SelacoArchipelago::LoadItemData() {
-    // Load all item definitions
-    m_items.clear();
-    
-    const auto& itemDefs = GetItemDefinitions();
-    for (size_t i = 0; i < itemDefs.size(); ++i) {
-        const ItemDef& item = itemDefs[i];
-        m_items[item.id] = item;
-    }
-    
-    Printf("Loaded %zu item definitions\n", m_items.size());
-}
-
-void SelacoArchipelago::LoadLocationData() {
-    // Load all location definitions
-    m_locations.clear();
-    
-    const auto& locationDefs = GetLocationDefinitions();
-    for (size_t i = 0; i < locationDefs.size(); ++i) {
-        const LocationDef& location = locationDefs[i];
-        m_locations[location.id] = location;
-    }
-    
-    Printf("Loaded %zu location definitions\n", m_locations.size());
-}
-
-std::string SelacoArchipelago::GenerateUUID() {
-    // Simple UUID generation
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
-    static std::uniform_int_distribution<> dis(0, 15);
-    
-    std::stringstream ss;
-    for (int i = 0; i < 32; ++i) {
-        if (i == 8 || i == 12 || i == 16 || i == 20) {
-            ss << "-";
+void OnItemReceived(int itemId, const char* itemName) {
+    // Prevent duplicate item grants
+    if (g_receivedItems.find(itemId) != g_receivedItems.end()) {
+        if (archipelago_debug) {
+            Printf("Item %d already received, skipping\n", itemId);
         }
-        ss << std::hex << dis(gen);
-    }
-    
-    return ss.str();
-}
-
-// Console command handlers
-void SelacoArchipelago::CMD_CheckLocation(int location_id) {
-    if (!g_archipelago || !g_archipelago->IsConnected()) {
-        Printf("Not connected to Archipelago\n");
         return;
     }
     
-    g_archipelago->CheckLocation(location_id);
-}
-
-void SelacoArchipelago::CMD_ListLocations(const std::string& map_name) {
-    if (!g_archipelago) {
-        Printf("Archipelago not initialized\n");
+    g_receivedItems.insert(itemId);
+    
+    const ItemDef* item = GetItemById(itemId);
+    if (!item) {
+        Printf(TEXTCOLOR_RED "Unknown item ID: %d\n", itemId);
         return;
     }
     
-    Printf("Locations in %s:\n", map_name.c_str());
+    Printf(TEXTCOLOR_GREEN "Archipelago: Received %s\n", item->name.c_str());
     
-    for (const auto& pair : g_archipelago->m_locations) {
-        const LocationDef& loc = pair.second;
-        if (loc.map_name == map_name || map_name.empty()) {
-            bool checked = std::find(g_archipelago->m_checked_locations.begin(),
-                                   g_archipelago->m_checked_locations.end(), pair.first)
-                          != g_archipelago->m_checked_locations.end();
-            
-            Printf("  %d: %s %s\n", pair.first, loc.name.c_str(), 
-                   checked ? TEXTCOLOR_GREEN "[CHECKED]" : "");
+    // Get the current player
+    auto player = players[consoleplayer].mo;
+    if (!player) {
+        Printf(TEXTCOLOR_RED "Error: No player actor found\n");
+        return;
+    }
+    
+    // Grant items based on ID ranges
+    int64_t baseId = itemId - SELACO_BASE_ID;
+    
+    // Weapons (1000-1999)
+    if (baseId >= 1000 && baseId < 2000) {
+        switch (baseId) {
+            case 1000: GiveWeaponToPlayer(player, "Pistol"); break;
+            case 1001: GiveWeaponToPlayer(player, "Shotgun"); break;
+            case 1002: GiveWeaponToPlayer(player, "AssaultRifle"); break;
+            case 1003: GiveWeaponToPlayer(player, "GrenadeLauncher"); break;
+            case 1004: GiveWeaponToPlayer(player, "RocketLauncher"); break;
+            case 1005: GiveWeaponToPlayer(player, "PlasmaRifle"); break;
+            case 1006: GiveWeaponToPlayer(player, "RailGun"); break;
+            case 1007: GiveWeaponToPlayer(player, "FlameThrower"); break;
+            case 1008: GiveWeaponToPlayer(player, "LightningGun"); break;
+            case 1009: GiveWeaponToPlayer(player, "BFG9000"); break;
+            default:
+                Printf(TEXTCOLOR_YELLOW "Weapon %s not implemented\n", item->name.c_str());
+        }
+    }
+    // Ammo (2000-2999)
+    else if (baseId >= 2000 && baseId < 3000) {
+        switch (baseId) {
+            case 2000: GiveAmmoToPlayer(player, "Clip", 20); break;
+            case 2001: GiveAmmoToPlayer(player, "Shell", 8); break;
+            case 2002: GiveAmmoToPlayer(player, "RifleAmmo", 30); break;
+            case 2003: GiveAmmoToPlayer(player, "GrenadeAmmo", 5); break;
+            case 2004: GiveAmmoToPlayer(player, "RocketAmmo", 2); break;
+            case 2005: GiveAmmoToPlayer(player, "Cell", 40); break;
+            case 2006: GiveAmmoToPlayer(player, "RailAmmo", 10); break;
+            case 2007: GiveAmmoToPlayer(player, "FuelAmmo", 50); break;
+            case 2008: GiveAmmoToPlayer(player, "LightningAmmo", 20); break;
+            case 2009: GiveAmmoToPlayer(player, "BFGAmmo", 5); break;
+            default:
+                Printf(TEXTCOLOR_YELLOW "Ammo %s not implemented\n", item->name.c_str());
+        }
+    }
+    // Health & Armor (3000-3999)
+    else if (baseId >= 3000 && baseId < 4000) {
+        switch (baseId) {
+            case 3000: GiveHealthToPlayer(player, 25); break;
+            case 3001: GiveHealthToPlayer(player, 50); break;
+            case 3002: GiveArmorToPlayer(player, 5); break;
+            case 3003: GiveArmorToPlayer(player, 50); break;
+            case 3004: GiveArmorToPlayer(player, 100); break;
+            case 3005: GiveMegaHealthToPlayer(player); break;
+            case 3006: GiveInvulnerabilityToPlayer(player, 30); break;
+            default:
+                Printf(TEXTCOLOR_YELLOW "Health/Armor %s not implemented\n", item->name.c_str());
+        }
+    }
+    // Keys & Access (4000-4999)
+    else if (baseId >= 4000 && baseId < 5000) {
+        switch (baseId) {
+            case 4000: GiveKeyToPlayer(player, "RedCard"); break;
+            case 4001: GiveKeyToPlayer(player, "BlueCard"); break;
+            case 4002: GiveKeyToPlayer(player, "YellowCard"); break;
+            case 4003: GiveKeyToPlayer(player, "GreenCard"); break;
+            case 4004: GiveKeyToPlayer(player, "SecurityAlpha"); break;
+            case 4005: GiveKeyToPlayer(player, "SecurityBeta"); break;
+            case 4006: GiveKeyToPlayer(player, "SecurityOmega"); break;
+            case 4007: GiveKeyToPlayer(player, "MasterKey"); break;
+            default:
+                Printf(TEXTCOLOR_YELLOW "Key %s not implemented\n", item->name.c_str());
+        }
+    }
+    // Upgrades & Abilities (5000-5999)
+    else if (baseId >= 5000 && baseId < 6000) {
+        switch (baseId) {
+            case 5000: ApplyDamageBoost(player, 1.25f); break;
+            case 5001: ApplySpeedBoost(player, 1.20f); break;
+            case 5002: EnableJumpBoots(player); break;
+            case 5003: GivePowerupToPlayer(player, "PowerLightAmp"); break;
+            case 5004: EnableRadarScanner(player); break;
+            case 5005: GivePowerupToPlayer(player, "PowerInvisibility"); break;
+            case 5006: EnableAmmoConverter(player); break;
+            case 5007: EnableHealthRegeneration(player); break;
+            default:
+                Printf(TEXTCOLOR_YELLOW "Upgrade %s not implemented\n", item->name.c_str());
+        }
+    }
+    // Special Items (6000-6999)
+    else if (baseId >= 6000 && baseId < 7000) {
+        switch (baseId) {
+            case 6000: RevealFullMap(); break;
+            case 6001: HighlightSecrets(); break;
+            case 6002: GrantCheckpointToken(player); break;
+            case 6003: GiveBackpackToPlayer(player); break;
+            case 6004: GivePowerupToPlayer(player, "PowerStrength"); break;
+            case 6005: GivePowerupToPlayer(player, "PowerTimeFreezer"); break;
+            default:
+                Printf(TEXTCOLOR_YELLOW "Special item %s not implemented\n", item->name.c_str());
+        }
+    }
+    // Progressive Items (7000-7999)
+    else if (baseId >= 7000 && baseId < 8000) {
+        switch (baseId) {
+            case 7000: GiveProgressiveWeapon(player); break;
+            case 7001: GiveProgressiveArmor(player); break;
+            case 7002: GiveProgressiveAccess(player); break;
+            case 7003: GiveProgressiveAbility(player); break;
+            default:
+                Printf(TEXTCOLOR_YELLOW "Progressive item %s not implemented\n", item->name.c_str());
+        }
+    }
+    
+    // Play item received sound
+    S_Sound(CHAN_ITEM, "misc/secret", 1, ATTN_NONE);
+}
+
+void OnLocationChecked(int locationId, const char* locationName) {
+    // Prevent duplicate location checks
+    if (g_checkedLocations.find(locationId) != g_checkedLocations.end()) {
+        return;
+    }
+    
+    g_checkedLocations.insert(locationId);
+    
+    const LocationDef* location = GetLocationById(locationId);
+    if (!location) {
+        Printf(TEXTCOLOR_RED "Unknown location ID: %d\n", locationId);
+        return;
+    }
+    
+    Printf(TEXTCOLOR_CYAN "Location checked: %s\n", location->name.c_str());
+    
+    // Send location check to Archipelago server
+    if (g_archipelagoSocket && g_archipelagoSocket->IsConnected()) {
+        // Format location check message
+        std::stringstream json;
+        json << "[{\"cmd\":\"LocationChecks\",\"locations\":[" << locationId << "]}]";
+        
+        ArchipelagoMessage msg;
+        msg.type = ArchipelagoMessageType::DATA;
+        msg.data = json.str();
+        
+        if (!g_archipelagoSocket->SendMessage(msg)) {
+            Printf(TEXTCOLOR_RED "Failed to send location check\n");
         }
     }
 }
 
-void SelacoArchipelago::CMD_SendItem(int item_id) {
-    if (!g_archipelago || !g_archipelago->IsConnected()) {
-        Printf("Not connected to Archipelago\n");
+void OnGoalCompleted(int goalId) {
+    Printf(TEXTCOLOR_GOLD "Archipelago: Goal %d completed!\n", goalId);
+    
+    // Handle victory condition
+    if (goalId == 0) { // Main goal
+        Printf(TEXTCOLOR_GOLD "Congratulations! You have completed Selaco in Archipelago!\n");
+        // Trigger ending sequence
+    }
+}
+
+void OnPlayerConnected(const char* playerName) {
+    Printf(TEXTCOLOR_GREEN "%s has connected to the multiworld\n", playerName);
+}
+
+void OnPlayerDisconnected(const char* playerName) {
+    Printf(TEXTCOLOR_ORANGE "%s has disconnected from the multiworld\n", playerName);
+}
+
+} // namespace ArchipelagoEvents
+
+// Helper functions for granting items
+
+static void GiveWeaponToPlayer(AActor* player, const char* weaponClass) {
+    if (!player) return;
+    
+    auto weaponType = PClass::FindActor(weaponClass);
+    if (!weaponType) {
+        Printf(TEXTCOLOR_RED "Unknown weapon class: %s\n", weaponClass);
         return;
     }
     
-    // Simulate receiving an item for testing
-    g_archipelago->ReceiveItem(item_id, 0);
-}
-
-// Global initialization functions
-void Archipelago_Selaco_Init() {
-    if (!g_archipelago) {
-        g_archipelago = std::make_unique<SelacoArchipelago>();
-        g_archipelago->Initialize();
+    auto weapon = player->GiveInventoryType(weaponType);
+    if (weapon) {
+        Printf("Gave weapon: %s\n", weaponClass);
     }
 }
 
-void Archipelago_Selaco_Shutdown() {
-    if (g_archipelago) {
-        g_archipelago->Shutdown();
-        g_archipelago.reset();
+static void GiveAmmoToPlayer(AActor* player, const char* ammoClass, int amount) {
+    if (!player) return;
+    
+    auto ammoType = PClass::FindActor(ammoClass);
+    if (!ammoType) {
+        Printf(TEXTCOLOR_RED "Unknown ammo class: %s\n", ammoClass);
+        return;
+    }
+    
+    player->GiveAmmo(ammoType, amount);
+    Printf("Gave %d %s\n", amount, ammoClass);
+}
+
+static void GiveHealthToPlayer(AActor* player, int amount) {
+    if (!player) return;
+    
+    player->health = MIN(player->health + amount, player->GetMaxHealth(true));
+    player->player->health = player->health;
+    Printf("Gave %d health\n", amount);
+}
+
+static void GiveArmorToPlayer(AActor* player, int amount) {
+    if (!player) return;
+    
+    auto armorType = PClass::FindActor("BasicArmor");
+    if (!armorType) return;
+    
+    auto armor = player->FindInventory(armorType);
+    if (!armor) {
+        armor = player->GiveInventoryType(armorType);
+    }
+    
+    if (armor) {
+        armor->Amount = MIN(armor->Amount + amount, armor->MaxAmount);
+        Printf("Gave %d armor\n", amount);
     }
 }
 
-void Archipelago_Selaco_ProcessMessages() {
-    if (g_archipelago) {
-        g_archipelago->ProcessMessages();
+static void GiveMegaHealthToPlayer(AActor* player) {
+    if (!player) return;
+    
+    player->health = MIN(player->health + 100, 200);
+    player->player->health = player->health;
+    Printf("Gave Mega Health\n");
+}
+
+static void GiveInvulnerabilityToPlayer(AActor* player, int duration) {
+    if (!player) return;
+    
+    auto invulnType = PClass::FindActor("PowerInvulnerable");
+    if (!invulnType) return;
+    
+    auto powerup = player->GiveInventoryType(invulnType);
+    if (powerup) {
+        powerup->EffectTics = duration * TICRATE;
+        Printf("Gave invulnerability for %d seconds\n", duration);
     }
 }
 
-bool Archipelago_Selaco_IsConnected() {
-    return g_archipelago && g_archipelago->IsConnected();
+static void GiveKeyToPlayer(AActor* player, const char* keyClass) {
+    if (!player) return;
+    
+    auto keyType = PClass::FindActor(keyClass);
+    if (!keyType) {
+        Printf(TEXTCOLOR_RED "Unknown key class: %s\n", keyClass);
+        return;
+    }
+    
+    auto key = player->GiveInventoryType(keyType);
+    if (key) {
+        Printf("Gave key: %s\n", keyClass);
+    }
 }
 
-// Console commands
-CCMD(archipelago_check_location) {
+static void GivePowerupToPlayer(AActor* player, const char* powerupClass) {
+    if (!player) return;
+    
+    auto powerupType = PClass::FindActor(powerupClass);
+    if (!powerupType) {
+        Printf(TEXTCOLOR_RED "Unknown powerup class: %s\n", powerupClass);
+        return;
+    }
+    
+    auto powerup = player->GiveInventoryType(powerupType);
+    if (powerup) {
+        Printf("Gave powerup: %s\n", powerupClass);
+    }
+}
+
+static void GiveBackpackToPlayer(AActor* player) {
+    if (!player) return;
+    
+    auto backpackType = PClass::FindActor("Backpack");
+    if (!backpackType) return;
+    
+    player->GiveInventoryType(backpackType);
+    Printf("Gave backpack - ammo capacity increased\n");
+}
+
+// Game modification functions
+
+static void ApplyDamageBoost(AActor* player, float multiplier) {
+    if (!player) return;
+    
+    player->DamageMultiply = multiplier;
+    Printf("Damage multiplier set to %.2fx\n", multiplier);
+}
+
+static void ApplySpeedBoost(AActor* player, float multiplier) {
+    if (!player) return;
+    
+    player->Speed = player->GetDefault()->Speed * multiplier;
+    Printf("Speed multiplier set to %.2fx\n", multiplier);
+}
+
+static void EnableJumpBoots(AActor* player) {
+    if (!player || !player->player) return;
+    
+    player->player->jumpTics = -1; // Enable double jump
+    Printf("Jump boots enabled\n");
+}
+
+static void EnableRadarScanner(AActor* player) {
+    if (!player) return;
+    
+    // Set scanner flag
+    player->player->cheats |= CF_ALLMAP;
+    Printf("Radar scanner enabled\n");
+}
+
+static void EnableAmmoConverter(AActor* player) {
+    if (!player) return;
+    
+    // This would need custom implementation
+    Printf("Ammo converter enabled (not fully implemented)\n");
+}
+
+static void EnableHealthRegeneration(AActor* player) {
+    if (!player) return;
+    
+    // This would need custom implementation
+    Printf("Health regeneration enabled (not fully implemented)\n");
+}
+
+static void RevealFullMap() {
+    // Reveal all map lines
+    level.flags2 |= LEVEL2_ALLMAP;
+    Printf("Map fully revealed\n");
+}
+
+static void HighlightSecrets() {
+    // This would need custom implementation
+    Printf("Secret areas highlighted (not fully implemented)\n");
+}
+
+static void GrantCheckpointToken(AActor* player) {
+    if (!player) return;
+    
+    // This would need custom implementation
+    Printf("Checkpoint token granted (not fully implemented)\n");
+}
+
+// Progressive item tracking
+static int g_progressiveWeaponLevel = 0;
+static int g_progressiveArmorLevel = 0;
+static int g_progressiveAccessLevel = 0;
+static int g_progressiveAbilityLevel = 0;
+
+static void GiveProgressiveWeapon(AActor* player) {
+    const char* weapons[] = {
+        "Pistol", "Shotgun", "AssaultRifle", "GrenadeLauncher",
+        "RocketLauncher", "PlasmaRifle", "RailGun", "BFG9000"
+    };
+    
+    if (g_progressiveWeaponLevel < 8) {
+        GiveWeaponToPlayer(player, weapons[g_progressiveWeaponLevel]);
+        g_progressiveWeaponLevel++;
+    }
+}
+
+static void GiveProgressiveArmor(AActor* player) {
+    int armorAmounts[] = { 25, 50, 75, 100, 150, 200 };
+    
+    if (g_progressiveArmorLevel < 6) {
+        GiveArmorToPlayer(player, armorAmounts[g_progressiveArmorLevel]);
+        g_progressiveArmorLevel++;
+    }
+}
+
+static void GiveProgressiveAccess(AActor* player) {
+    const char* keys[] = {
+        "RedCard", "BlueCard", "YellowCard",
+        "SecurityAlpha", "SecurityBeta", "SecurityOmega"
+    };
+    
+    if (g_progressiveAccessLevel < 6) {
+        GiveKeyToPlayer(player, keys[g_progressiveAccessLevel]);
+        g_progressiveAccessLevel++;
+    }
+}
+
+static void GiveProgressiveAbility(AActor* player) {
+    switch (g_progressiveAbilityLevel) {
+        case 0: ApplySpeedBoost(player, 1.1f); break;
+        case 1: EnableJumpBoots(player); break;
+        case 2: ApplyDamageBoost(player, 1.15f); break;
+        case 3: EnableRadarScanner(player); break;
+        case 4: EnableHealthRegeneration(player); break;
+        default: break;
+    }
+    
+    if (g_progressiveAbilityLevel < 5) {
+        g_progressiveAbilityLevel++;
+    }
+}
+
+// Console commands for testing
+
+CCMD(archipelago_listitems) {
+    Printf("=== Archipelago Items for Selaco ===\n");
+    Printf("ID         | Name                      | Description\n");
+    Printf("-----------|---------------------------|----------------------------\n");
+    
+    for (const auto& item : SELACO_ITEMS) {
+        Printf("%10lld | %-25s | %s\n", 
+               static_cast<long long>(item.id),
+               item.name.c_str(), 
+               item.description.c_str());
+    }
+    
+    Printf("\nTotal items: %zu\n", SELACO_ITEMS.size());
+}
+
+CCMD(archipelago_listlocations) {
+    Printf("=== Archipelago Locations for Selaco ===\n");
+    Printf("ID         | Name                      | Description\n");
+    Printf("-----------|---------------------------|----------------------------\n");
+    
+    for (const auto& loc : SELACO_LOCATIONS) {
+        Printf("%10lld | %-25s | %s\n", 
+               static_cast<long long>(loc.id),
+               loc.name.c_str(), 
+               loc.description.c_str());
+    }
+    
+    Printf("\nTotal locations: %zu\n", SELACO_LOCATIONS.size());
+}
+
+CCMD(archipelago_testitem) {
     if (argv.argc() < 2) {
-        Printf("Usage: archipelago_check_location <location_id>\n");
+        Printf("Usage: archipelago_testitem <item_id>\n");
+        Printf("Example: archipelago_testitem %lld (for Pistol)\n", 
+               static_cast<long long>(SELACO_BASE_ID + 1000));
         return;
     }
     
-    int location_id = atoi(argv[1]);
-    SelacoArchipelago::CMD_CheckLocation(location_id);
-}
-
-CCMD(archipelago_list_locations) {
-    std::string map_name;
-    if (argv.argc() >= 2) {
-        map_name = argv[1];
-    }
+    int64_t itemId = static_cast<int64_t>(strtoull(argv[1], nullptr, 0));
+    const ItemDef* item = GetItemById(itemId);
     
-    SelacoArchipelago::CMD_ListLocations(map_name);
+    if (item) {
+        ArchipelagoEvents::OnItemReceived(itemId, item->name.c_str());
+    } else {
+        Printf(TEXTCOLOR_RED "Invalid item ID: %lld\n", static_cast<long long>(itemId));
+    }
 }
 
-CCMD(archipelago_send_item) {
+CCMD(archipelago_testlocation) {
     if (argv.argc() < 2) {
-        Printf("Usage: archipelago_send_item <item_id>\n");
+        Printf("Usage: archipelago_testlocation <location_id>\n");
+        Printf("Example: archipelago_testlocation %lld (for Complete Chapter 1)\n",
+               static_cast<long long>(SELACO_BASE_ID + 10000));
         return;
     }
     
-    int item_id = atoi(argv[1]);
-    SelacoArchipelago::CMD_SendItem(item_id);
-}
-
-CCMD(archipelago_death_link) {
-    if (!g_archipelago || !g_archipelago->IsConnected()) {
-        Printf("Not connected to Archipelago\n");
-        return;
-    }
+    int64_t locationId = static_cast<int64_t>(strtoull(argv[1], nullptr, 0));
+    const LocationDef* location = GetLocationById(locationId);
     
-    g_archipelago->SendDeathLink("Killed by console command");
-    Printf("Death link sent\n");
-}
-
-CCMD(archipelago_enable_upgrade) {
-    if (argv.argc() < 2) {
-        Printf("Usage: archipelago_enable_upgrade <upgrade_name>\n");
-        return;
+    if (location) {
+        ArchipelagoEvents::OnLocationChecked(locationId, location->name.c_str());
+    } else {
+        Printf(TEXTCOLOR_RED "Invalid location ID: %lld\n", static_cast<long long>(locationId));
     }
-    
-    // This would interface with Selaco's weapon upgrade system
-    // to enable the specified upgrade
-    Printf("Enabling upgrade: %s\n", argv[1]);
 }
 
-} // namespace Archipelago
+CCMD(archipelago_clearitems) {
+    g_receivedItems.clear();
+    g_checkedLocations.clear();
+    g_progressiveWeaponLevel = 0;
+    g_progressiveArmorLevel = 0;
+    g_progressiveAccessLevel = 0;
+    g_progressiveAbilityLevel = 0;
+    Printf("Cleared all received items and checked locations\n");
+}
+
+CCMD(archipelago_status) {
+    Printf("=== Archipelago Status ===\n");
+    Printf("Received items: %zu\n", g_receivedItems.size());
+    Printf("Checked locations: %zu\n", g_checkedLocations.size());
+    Printf("Progressive levels:\n");
+    Printf("  Weapon: %d/8\n", g_progressiveWeaponLevel);
+    Printf("  Armor: %d/6\n", g_progressiveArmorLevel);
+    Printf("  Access: %d/6\n", g_progressiveAccessLevel);
+    Printf("  Ability: %d/5\n", g_progressiveAbilityLevel);
+}
