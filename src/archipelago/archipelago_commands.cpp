@@ -2,6 +2,7 @@
 #include "c_dispatch.h"
 #include "c_cvars.h"
 #include "doomtype.h"
+#include "menu/menu.h"  // For M_ClearMenus and menu functions
 #include <memory>
 #include <sstream>
 
@@ -157,6 +158,60 @@ CCMD(archipelago_connect) {
     }
 }
 
+// Menu-friendly connect command that uses CVars directly
+CCMD(archipelago_connect_menu) {
+    if (!g_archipelagoSocket) {
+        g_archipelagoSocket = std::make_unique<ArchipelagoSocket>();
+    }
+    
+    if (g_archipelagoSocket->IsConnected()) {
+        Printf("Already connected to Archipelago server\n");
+        Printf("Use 'archipelago_disconnect' first to change servers\n");
+        return;
+    }
+    
+    // Get values from CVars
+    const char* hostCStr = archipelago_host;
+    const char* slotCStr = archipelago_slot;
+    const char* passCStr = archipelago_password;
+    
+    std::string host = hostCStr ? hostCStr : "localhost";
+    uint16_t port = archipelago_port;
+    std::string slot = slotCStr ? slotCStr : "";
+    std::string password = passCStr ? passCStr : "";
+    
+    // Validate slot name
+    if (slot.empty()) {
+        Printf(TEXTCOLOR_RED "Error: Slot name is required!\n");
+        Printf("Please set a slot name in the Archipelago menu\n");
+        
+        // Open the menu if we're not connected
+        C_DoCommand("menu_archipelago");
+        return;
+    }
+    
+    // Close any open menus before connecting
+    M_ClearMenus();
+    
+    Printf("Connecting to %s:%d as '%s'...\n", host.c_str(), port, slot.c_str());
+    
+    if (g_archipelagoSocket->Connect(host, port, slot, password)) {
+        // Connection successful - save settings
+        archipelago_host = host.c_str();
+        archipelago_port = port;
+        archipelago_slot = slot.c_str();
+        archipelago_password = password.c_str();
+        
+        Printf(TEXTCOLOR_GREEN "Successfully initiated connection to Archipelago server\n");
+    } else {
+        Printf(TEXTCOLOR_RED "Failed to connect: %s\n", 
+               g_archipelagoSocket->GetLastError().c_str());
+               
+        // Reopen the menu on failure
+        C_DoCommand("menu_archipelago");
+    }
+}
+
 CCMD(archipelago_disconnect) {
     if (!g_archipelagoSocket) {
         Printf("Archipelago system not initialized\n");
@@ -237,11 +292,36 @@ CCMD(archipelago_debug) {
     Printf("Archipelago debug mode: %s\n", archipelago_debug ? "ON" : "OFF");
 }
 
+// Optional: Add a status check function that returns connection state
+CCMD(archipelago_is_connected) {
+    bool connected = g_archipelagoSocket && g_archipelagoSocket->IsConnected();
+    Printf("Archipelago connection status: %s\n", 
+           connected ? "Connected" : "Not connected");
+}
+
+// Optional: Quick reconnect command
+CCMD(archipelago_reconnect) {
+    if (!g_archipelagoSocket) {
+        g_archipelagoSocket = std::make_unique<ArchipelagoSocket>();
+    }
+    
+    // Disconnect if connected
+    if (g_archipelagoSocket->IsConnected()) {
+        g_archipelagoSocket->Disconnect();
+        Printf("Disconnected from previous session\n");
+    }
+    
+    // Use the connect_menu command to reconnect
+    C_DoCommand("archipelago_connect_menu");
+}
+
 // Help command
 CCMD(archipelago_help) {
     Printf("Archipelago Commands:\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_connect <slot_name> [host:port] [password]\n");
     Printf("    - Connect to server with specified slot name\n");
+    Printf(TEXTCOLOR_GOLD "  archipelago_connect_menu\n");
+    Printf("    - Connect using settings from the menu\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_disconnect\n");
     Printf("    - Disconnect from server\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_status\n");
@@ -252,6 +332,10 @@ CCMD(archipelago_help) {
     Printf("    - Send a test message\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_debug\n");
     Printf("    - Toggle debug mode\n");
+    Printf(TEXTCOLOR_GOLD "  archipelago_reconnect\n");
+    Printf("    - Reconnect to last server\n");
+    Printf(TEXTCOLOR_GOLD "  menu_archipelago\n");
+    Printf("    - Open the Archipelago menu (also F10)\n");
     Printf("\nCVars:\n");
     Printf("  archipelago_host - Server hostname (current: %s)\n", 
            (const char*)archipelago_host);
@@ -262,4 +346,24 @@ CCMD(archipelago_help) {
     Printf("  archipelago_password - Default password\n");
     Printf("  archipelago_autoconnect - Auto-connect on startup (current: %s)\n",
            archipelago_autoconnect ? "true" : "false");
+}
+
+// Helper function for checking connection status (for menu use)
+bool Archipelago_IsConnected() {
+    return g_archipelagoSocket && g_archipelagoSocket->IsConnected();
+}
+
+// Get connection status string
+const char* Archipelago_GetConnectionStatus() {
+    if (!g_archipelagoSocket) {
+        return "Not initialized";
+    }
+    
+    if (g_archipelagoSocket->IsConnected()) {
+        static std::string status;
+        status = g_archipelagoSocket->GetConnectionInfo();
+        return status.c_str();
+    }
+    
+    return "Not connected";
 }

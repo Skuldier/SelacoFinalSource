@@ -928,6 +928,7 @@ set (PCH_SOURCES
 	menu/doommenu.cpp
 	menu/loadsavemenu.cpp
 	menu/playermenu.cpp
+        menu/archipelago_menu.cpp
 	gamedata/textures/animations.cpp
 	gamedata/textures/anim_switches.cpp
 	gamedata/textures/buildloader.cpp

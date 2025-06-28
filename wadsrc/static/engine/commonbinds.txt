@@ -47,7 +47,7 @@ f3 load_menu
 f4 "openmenu SelacoOptionMenu"
 f6 quicksaveselaco
 f9 quickload
-f10 menu_quit
+f10 menu_archipelago
 tab togglemap
 sysrq screenshot
 mwheeldown weapnext

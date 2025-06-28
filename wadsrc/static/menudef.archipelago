@@ -1,0 +1,103 @@
+//=============================================================================
+//
+// Archipelago Connection Menu
+//
+//=============================================================================
+
+OptionMenu "ArchipelagoMenu"
+{
+    Title "ARCHIPELAGO CONNECTION"
+    
+    StaticText ""
+    StaticText "Enter server details to connect to Archipelago:", "Gold"
+    StaticText ""
+    
+    // Server Host
+    TextField "Server Host:", "archipelago_host"
+    
+    // Server Port
+    NumberField "Server Port:", "archipelago_port", 1, 65535
+    
+    StaticText ""
+    
+    // Slot Name (Player Name)
+    TextField "Slot Name:", "archipelago_slot"
+    
+    // Password (optional)
+    TextField "Password:", "archipelago_password"
+    
+    StaticText ""
+    StaticText ""
+    
+    // Connection Actions
+    StaticText "Actions:", "Gold"
+    Command "Connect to Server", "archipelago_connect_menu"
+    Command "Disconnect", "archipelago_disconnect"
+    Command "Show Status", "archipelago_status"
+    
+    StaticText ""
+    StaticText ""
+    
+    // Help text
+    StaticText "Tips:", "Gold"
+    StaticText "- Default server is localhost:38281", "Gray"
+    StaticText "- Slot name is your player identifier", "Gray"
+    StaticText "- Password is only needed for private servers", "Gray"
+}
+
+// Alternative List Menu version (if you prefer a more styled approach)
+ListMenu "ArchipelagoMenuList"
+{
+    IfGame(Doom, Chex)
+    {
+        StaticPatch 105, 0, "M_DOOM"
+        Position 97, 72
+    }
+    IfGame(Strife)
+    {
+        StaticPatch 84, 2, "M_STRIFE"
+        Position 97, 45
+    }
+    IfGame(Heretic, Hexen)
+    {
+        StaticPatch 88, 0, "M_HTIC"
+        StaticPatch 40, 10, "M_SKL01"
+        StaticPatch 232, 10, "M_SKL00"
+        Position 110, 56
+    }
+
+    Font "BigFont", "Untranslated"
+    
+    TextItem "ARCHIPELAGO", "a", "ArchipelagoTitle"
+    Font "SmallFont"
+    StaticText 97, 100, "Connect to Archipelago Server"
+    
+    Position 97, 120
+    
+    TextItem "Connect", "c", "archipelago_connect_menu"
+    TextItem "Disconnect", "d", "archipelago_disconnect"
+    TextItem "Status", "s", "archipelago_status"
+    TextItem "Settings", "t", "ArchipelagoMenu"
+    StaticText " "
+    TextItem "Back", "b", "CloseMemu"
+}
+
+// Add to main options menu (optional)
+AddOptionMenu "OptionsMenu"
+{
+    StaticText ""
+    Submenu "Archipelago Settings", "ArchipelagoMenu"
+}
+
+// Quick connect dialog
+OptionMenu "ArchipelagoQuickConnect"
+{
+    Title "QUICK CONNECT"
+    
+    StaticText ""
+    TextField "Slot Name:", "archipelago_slot"
+    StaticText ""
+    
+    Command "Connect with defaults", "archipelago_connect_menu"
+    Command "Advanced Settings", "ArchipelagoMenu"
+}
