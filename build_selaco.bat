@@ -42,10 +42,11 @@ cd "%BUILD_DIR%"
 :: Configure with CMake
 echo [*] Configuring project with CMake...
 echo     Build Type: %BUILD_TYPE%
+echo     mbedTLS: FORCE_INTERNAL_MBEDTLS=ON
 echo     CMake Flags: -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -Wno-dev
 echo.
 
-cmake .. -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -Wno-dev
+cmake .. -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DFORCE_INTERNAL_MBEDTLS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -Wno-dev
 
 if %errorlevel% neq 0 (
     echo.
@@ -57,6 +58,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [*] Configuration successful!
+echo [*] mbedTLS will be built for SSL/TLS support
 echo.
 
 :: Build the project

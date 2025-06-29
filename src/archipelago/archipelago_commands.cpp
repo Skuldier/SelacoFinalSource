@@ -210,12 +210,16 @@ CCMD(archipelago_send) {
         ss << argv[i];
     }
     
+    // Create Say command
+    std::stringstream json;
+    json << "[{\"cmd\":\"Say\",\"text\":\"" << ss.str() << "\"}]";
+    
     ArchipelagoMessage msg;
     msg.type = ArchipelagoMessageType::DATA;
-    msg.data = ss.str();
+    msg.data = json.str();
     
     if (g_archipelagoSocket->SendMessage(msg)) {
-        Printf("Message sent: %s\n", msg.data.c_str());
+        Printf("Message sent: %s\n", ss.str().c_str());
     } else {
         Printf(TEXTCOLOR_RED "Failed to send message: %s\n", 
                g_archipelagoSocket->GetLastError().c_str());
@@ -225,6 +229,208 @@ CCMD(archipelago_send) {
 CCMD(archipelago_debug) {
     archipelago_debug = !archipelago_debug;
     Printf("Archipelago debug mode: %s\n", archipelago_debug ? "ON" : "OFF");
+}
+
+// Test raw WebSocket connection
+CCMD(archipelago_test_raw) {
+    const char* host = archipelago_host;
+    int port = archipelago_port;
+    
+    if (argv.argc() >= 2) {
+        // Parse host:port from argument
+        std::string hostPort = argv[1];
+        size_t colonPos = hostPort.find(':');
+        
+        if (colonPos != std::string::npos) {
+            host = hostPort.substr(0, colonPos).c_str();
+            port = atoi(hostPort.substr(colonPos + 1).c_str());
+        } else {
+            host = hostPort.c_str();
+        }
+    }
+    
+    Printf("=== Archipelago Raw Connection Test ===\n");
+    Printf("Testing: %s:%d\n\n", host, port);
+    
+    // Initialize sockets if needed
+    #ifdef _WIN32
+        WSADATA wsaData;
+        WSAStartup(MAKEWORD(2, 2), &wsaData);
+    #endif
+    
+    // Create socket
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) {
+        Printf(TEXTCOLOR_RED "Failed to create socket\n");
+        return;
+    }
+    
+    // Set timeout
+    #ifdef _WIN32
+        DWORD timeout = 5000; // 5 seconds
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+    #else
+        struct timeval tv;
+        tv.tv_sec = 5;
+        tv.tv_usec = 0;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    #endif
+    
+    // Resolve host
+    Printf("1. Resolving hostname...\n");
+    struct hostent* hostinfo = gethostbyname(host);
+    if (!hostinfo) {
+        Printf(TEXTCOLOR_RED "   Failed to resolve %s\n", host);
+        closesocket(sock);
+        return;
+    }
+    Printf(TEXTCOLOR_GREEN "   ✓ Resolved successfully\n");
+    
+    // Connect
+    Printf("\n2. Connecting TCP socket...\n");
+    sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr = *((struct in_addr*)hostinfo->h_addr);
+    
+    if (connect(sock, (sockaddr*)&addr, sizeof(addr)) != 0) {
+        Printf(TEXTCOLOR_RED "   Failed to connect\n");
+        closesocket(sock);
+        return;
+    }
+    Printf(TEXTCOLOR_GREEN "   ✓ TCP connected\n");
+    
+    // Send WebSocket handshake
+    Printf("\n3. Sending WebSocket handshake...\n");
+    std::stringstream request;
+    request << "GET / HTTP/1.1\r\n";
+    request << "Host: " << host << ":" << port << "\r\n";
+    request << "Upgrade: websocket\r\n";
+    request << "Connection: Upgrade\r\n";
+    request << "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
+    request << "Sec-WebSocket-Version: 13\r\n";
+    request << "\r\n";
+    
+    std::string req = request.str();
+    Printf("   Request (%zu bytes):\n", req.length());
+    Printf(TEXTCOLOR_CYAN "%s", req.c_str());
+    
+    int sent = send(sock, req.c_str(), req.length(), 0);
+    if (sent != req.length()) {
+        Printf(TEXTCOLOR_RED "   Failed to send complete request\n");
+        closesocket(sock);
+        return;
+    }
+    Printf(TEXTCOLOR_GREEN "   ✓ Sent %d bytes\n", sent);
+    
+    // Receive response
+    Printf("\n4. Waiting for response...\n");
+    char buffer[4096];
+    int totalReceived = 0;
+    std::string response;
+    
+    // Try to receive with a timeout
+    while (totalReceived < sizeof(buffer) - 1) {
+        int bytes = recv(sock, buffer + totalReceived, sizeof(buffer) - totalReceived - 1, 0);
+        
+        if (bytes > 0) {
+            totalReceived += bytes;
+            buffer[totalReceived] = '\0';
+            
+            // Check if we have complete headers
+            if (strstr(buffer, "\r\n\r\n") != nullptr) {
+                Printf(TEXTCOLOR_GREEN "   ✓ Received complete headers (%d bytes)\n", totalReceived);
+                break;
+            }
+        } else if (bytes == 0) {
+            Printf(TEXTCOLOR_YELLOW "   Connection closed by server\n");
+            break;
+        } else {
+            #ifdef _WIN32
+                int error = WSAGetLastError();
+                if (error == WSAETIMEDOUT) {
+                    Printf(TEXTCOLOR_YELLOW "   Timeout after %d bytes\n", totalReceived);
+                } else {
+                    Printf(TEXTCOLOR_RED "   Socket error: %d\n", error);
+                }
+            #else
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                    Printf(TEXTCOLOR_YELLOW "   Timeout after %d bytes\n", totalReceived);
+                } else {
+                    Printf(TEXTCOLOR_RED "   Socket error: %s\n", strerror(errno));
+                }
+            #endif
+            break;
+        }
+    }
+    
+    closesocket(sock);
+    
+    // Display response
+    Printf("\n5. Response analysis:\n");
+    if (totalReceived > 0) {
+        buffer[totalReceived] = '\0';
+        
+        // Show first line
+        char* firstLine = buffer;
+        char* lineEnd = strstr(buffer, "\r\n");
+        if (lineEnd) {
+            *lineEnd = '\0';
+            Printf("   Status: %s%s\n", 
+                   strstr(firstLine, "101") ? TEXTCOLOR_GREEN : TEXTCOLOR_RED,
+                   firstLine);
+            *lineEnd = '\r';
+        }
+        
+        // Check for WebSocket headers
+        bool hasUpgrade = strstr(buffer, "Upgrade: websocket") || strstr(buffer, "upgrade: websocket");
+        bool hasConnection = strstr(buffer, "Connection: Upgrade") || strstr(buffer, "connection: upgrade");
+        
+        Printf("   Upgrade header: %s%s\n", 
+               hasUpgrade ? TEXTCOLOR_GREEN : TEXTCOLOR_RED,
+               hasUpgrade ? "Found" : "Missing");
+        Printf("   Connection header: %s%s\n",
+               hasConnection ? TEXTCOLOR_GREEN : TEXTCOLOR_RED,
+               hasConnection ? "Found" : "Missing");
+        
+        // Show full response
+        Printf("\n   Full response:\n");
+        Printf(TEXTCOLOR_GRAY "---START---\n%s\n---END---\n", buffer);
+        
+        // Diagnose common issues
+        if (!strstr(buffer, "101")) {
+            Printf(TEXTCOLOR_YELLOW "\n⚠ Server did not return 101 Switching Protocols\n");
+            Printf("  This might not be a WebSocket endpoint\n");
+        }
+        if (!hasUpgrade || !hasConnection) {
+            Printf(TEXTCOLOR_YELLOW "\n⚠ Missing required WebSocket headers\n");
+        }
+    } else {
+        Printf(TEXTCOLOR_RED "   No response received\n");
+        Printf("\nPossible causes:\n");
+        Printf("- Port %d is not a WebSocket server\n", port);
+        Printf("- Server expects HTTPS/WSS instead of HTTP/WS\n");
+        Printf("- Firewall blocking response\n");
+        Printf("- Server crashed or closed connection\n");
+    }
+    
+    Printf("\n=== Test Complete ===\n");
+}
+
+// Simple version that uses current settings
+CCMD(archipelago_test) {
+    if (strlen(archipelago_host) == 0) {
+        Printf("Please set archipelago_host first\n");
+        return;
+    }
+    
+    Printf("Testing connection to %s:%d...\n", 
+           (const char*)archipelago_host, (int)archipelago_port);
+    
+    // Build command with current host:port
+    std::stringstream cmd;
+    cmd << "archipelago_test_raw " << archipelago_host << ":" << archipelago_port;
+    C_DoCommand(cmd.str().c_str());
 }
 
 // Help command
@@ -239,17 +445,13 @@ CCMD(archipelago_help) {
     Printf(TEXTCOLOR_GOLD "  archipelago_setslot <slot_name>\n");
     Printf("    Set default slot name\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_send <message>\n");
-    Printf("    Send a test message\n");
+    Printf("    Send a chat message\n");
     Printf(TEXTCOLOR_GOLD "  archipelago_debug\n");
     Printf("    Toggle debug mode\n");
-    Printf(TEXTCOLOR_GOLD "  archipelago_listitems\n");
-    Printf("    List all available items\n");
-    Printf(TEXTCOLOR_GOLD "  archipelago_listlocations\n");
-    Printf("    List all available locations\n");
-    Printf(TEXTCOLOR_GOLD "  archipelago_testitem <item_id>\n");
-    Printf("    Test receiving an item\n");
-    Printf(TEXTCOLOR_GOLD "  archipelago_testlocation <location_id>\n");
-    Printf("    Test checking a location\n");
+    Printf(TEXTCOLOR_GOLD "  archipelago_test\n");
+    Printf("    Test connection to current host:port\n");
+    Printf(TEXTCOLOR_GOLD "  archipelago_test_raw [host:port]\n");
+    Printf("    Raw WebSocket connection test\n");
     Printf("\n=== CVars ===\n");
     Printf("  archipelago_host - Server hostname (current: %s)\n", 
            (const char*)archipelago_host);
@@ -260,4 +462,9 @@ CCMD(archipelago_help) {
     Printf("  archipelago_password - Default password\n");
     Printf("  archipelago_autoconnect - Auto-connect on startup (current: %s)\n",
            archipelago_autoconnect ? "true" : "false");
+    Printf("\n=== Troubleshooting ===\n");
+    Printf("1. Enable debug: archipelago_debug 1\n");
+    Printf("2. Test raw connection: archipelago_test_raw host:port\n");
+    Printf("3. Check firewall/antivirus settings\n");
+    Printf("4. Verify server is running and accepting connections\n");
 }
