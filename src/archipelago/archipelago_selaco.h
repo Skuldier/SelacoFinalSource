@@ -2,6 +2,7 @@
 
 // Forward declarations
 class FSerializer;
+struct player_t;
 
 // Main item processing function
 void ProcessArchipelagoItem(int itemId, const char* itemName);
@@ -39,3 +40,6 @@ enum ArchipelagoItemRanges {
     ITEM_PROGRESSIVE_START = 50060,
     ITEM_PROGRESSIVE_END = 50063
 };
+
+// Console command for testing
+// Usage: archipelago_testitem <item_id> [item_name]

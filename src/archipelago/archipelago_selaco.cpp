@@ -1,3 +1,7 @@
+#include <sstream>
+#include <algorithm>
+#include <string>
+
 #include "archipelago/archipelago_integration.h"
 #include "archipelago/archipelago_socket.h"
 #include "c_dispatch.h"
@@ -17,9 +21,6 @@
 #include "actor.h"
 #include "info.h"
 #include "d_event.h"
-#include "namedef.h"
-#include <sstream>
-#include <algorithm>
 
 // External references
 extern player_t players[MAXPLAYERS];
@@ -209,10 +210,8 @@ void SerializeArchipelagoState(FSerializer& arc) {
     // Serialize Archipelago-specific data here
     if (arc.isWriting()) {
         // Save state
-        std::stringstream json;
-        json << "{\"connected\":" << "false" << ",\"items_received\":[]}";
-        std::string jsonStr = json.str();
-        arc("archipelago_state", jsonStr);
+        std::string jsonData = "{\"connected\":false,\"items_received\":[]}";
+        arc("archipelago_state", jsonData);
     } else {
         // Load state
         std::string jsonStr;
@@ -255,7 +254,9 @@ static bool GiveAmmoToPlayer(player_t* player, const char* ammoType, int amount)
     
     if (ammo) {
         // Use the engine's method to add ammo properly
-        ammo->IntVar(NAME_Amount) = MIN(ammo->IntVar(NAME_Amount) + amount, ammo->IntVar(NAME_MaxAmount));
+        int currentAmount = ammo->IntVar("Amount");
+        int maxAmount = ammo->IntVar("MaxAmount");
+        ammo->IntVar("Amount") = MIN(currentAmount + amount, maxAmount);
         Printf(TEXTCOLOR_GOLD "Received %d %s\n", amount, ammoType);
         return true;
     }
