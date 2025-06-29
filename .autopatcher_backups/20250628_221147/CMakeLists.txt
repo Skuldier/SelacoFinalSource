@@ -333,34 +333,6 @@ set( CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${REL_C_F
 set( CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${DEB_C_FLAGS} -D_DEBUG" )
 
 option(FORCE_INTERNAL_BZIP2 "Use internal bzip2")
-
-# mbedTLS configuration
-option(FORCE_INTERNAL_MBEDTLS "Use internal mbedTLS" ON)
-mark_as_advanced(FORCE_INTERNAL_MBEDTLS)
-
-# Check for system mbedTLS first if not forcing internal
-if(NOT FORCE_INTERNAL_MBEDTLS)
-    find_package(MbedTLS)
-endif()
-
-if(MBEDTLS_FOUND AND NOT FORCE_INTERNAL_MBEDTLS)
-    message(STATUS "Using system mbedTLS library")
-    set(MBEDTLS_LIBRARIES mbedtls mbedcrypto mbedx509)
-else()
-    message(STATUS "Using internal mbedTLS library")
-    
-    # Configure mbedTLS options for minimal build
-    set(ENABLE_TESTING OFF CACHE BOOL "Build mbedTLS tests")
-    set(ENABLE_PROGRAMS OFF CACHE BOOL "Build mbedTLS programs")
-    set(UNSAFE_BUILD OFF CACHE BOOL "Allow unsafe builds")
-    
-    # Add mbedTLS subdirectory
-    add_subdirectory(libraries/mbedtls EXCLUDE_FROM_ALL)
-    
-    # Set up variables for our project
-    set(MBEDTLS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libraries/mbedtls/include" CACHE INTERNAL "")
-    set(MBEDTLS_LIBRARIES mbedtls mbedcrypto mbedx509 CACHE INTERNAL "")
-endif()
 option(FORCE_INTERNAL_ASMJIT "Use internal asmjit" ON)
 mark_as_advanced( FORCE_INTERNAL_ASMJIT )
 

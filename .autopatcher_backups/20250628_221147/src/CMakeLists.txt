@@ -47,10 +47,6 @@ endif()
 
 if( NOT PROJECT_LIBRARIES )
 	set( PROJECT_LIBRARIES "" )
-
-# Add mbedTLS to project libraries
-list(APPEND PROJECT_LIBRARIES ${MBEDTLS_LIBRARIES})
-
 endif()
 
 add_definitions( -DTHIS_IS_GZDOOM )
@@ -1357,10 +1353,6 @@ include_directories(
 	${SYSTEM_SOURCES_DIR}
 	archipelago
 )
-
-# Add mbedTLS include directory
-include_directories(SYSTEM ${MBEDTLS_INCLUDE_DIR})
-
 
 add_dependencies( zdoom revision_check )
 
