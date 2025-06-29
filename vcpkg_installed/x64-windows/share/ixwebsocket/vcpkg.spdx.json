@@ -1,0 +1,137 @@
+{
+  "$schema": "https://raw.githubusercontent.com/spdx/spdx-spec/v2.2.1/schemas/spdx-schema.json",
+  "spdxVersion": "SPDX-2.2",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "documentNamespace": "https://spdx.org/spdxdocs/ixwebsocket-x64-windows-11.4.4#2-0a4f5724-492f-4ac2-902b-556e0a35e155",
+  "name": "ixwebsocket:x64-windows@11.4.4#2 bd85bd5d4f75a156ccbc704cc45f6457358e41db26a9427843091e92ab869e02",
+  "creationInfo": {
+    "creators": [
+      "Tool: vcpkg-2025-06-20-ef7c0d541124bbdd334a03467e7edb6c3364d199"
+    ],
+    "created": "2025-06-29T21:41:09Z"
+  },
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-port",
+      "relationshipType": "GENERATES",
+      "relatedSpdxElement": "SPDXRef-binary"
+    },
+    {
+      "spdxElementId": "SPDXRef-port",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-file-0"
+    },
+    {
+      "spdxElementId": "SPDXRef-port",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-file-1"
+    },
+    {
+      "spdxElementId": "SPDXRef-port",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-file-2"
+    },
+    {
+      "spdxElementId": "SPDXRef-binary",
+      "relationshipType": "GENERATED_FROM",
+      "relatedSpdxElement": "SPDXRef-port"
+    },
+    {
+      "spdxElementId": "SPDXRef-file-0",
+      "relationshipType": "CONTAINED_BY",
+      "relatedSpdxElement": "SPDXRef-port"
+    },
+    {
+      "spdxElementId": "SPDXRef-file-1",
+      "relationshipType": "CONTAINED_BY",
+      "relatedSpdxElement": "SPDXRef-port"
+    },
+    {
+      "spdxElementId": "SPDXRef-file-2",
+      "relationshipType": "CONTAINED_BY",
+      "relatedSpdxElement": "SPDXRef-port"
+    },
+    {
+      "spdxElementId": "SPDXRef-file-2",
+      "relationshipType": "DEPENDENCY_MANIFEST_OF",
+      "relatedSpdxElement": "SPDXRef-port"
+    }
+  ],
+  "packages": [
+    {
+      "name": "ixwebsocket",
+      "SPDXID": "SPDXRef-port",
+      "versionInfo": "11.4.4#2",
+      "downloadLocation": "git+https://github.com/Microsoft/vcpkg@f0154088c4d12066bd00f7794ccb90feaa1f3d92",
+      "homepage": "https://github.com/machinezone/IXWebSocket",
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "description": "Lightweight WebSocket Client and Server + HTTP Client and Server",
+      "comment": "This is the port (recipe) consumed by vcpkg."
+    },
+    {
+      "name": "ixwebsocket:x64-windows",
+      "SPDXID": "SPDXRef-binary",
+      "versionInfo": "bd85bd5d4f75a156ccbc704cc45f6457358e41db26a9427843091e92ab869e02",
+      "downloadLocation": "NONE",
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "comment": "This is a binary package built by vcpkg."
+    },
+    {
+      "SPDXID": "SPDXRef-resource-0",
+      "name": "machinezone/IXWebSocket",
+      "downloadLocation": "git+https://github.com/machinezone/IXWebSocket@v11.4.4",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA512",
+          "checksumValue": "698ad96f25f53bf48906201826008bad46c657f8043d3653988716ddd9fb5dfeb52cebc002b3af76b91d0561155607a5f38bbc2c808aa67f438432207da82a35"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "fileName": "./fix-C2065-of-errorMsg.patch",
+      "SPDXID": "SPDXRef-file-0",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "0b6ed9406ede1334e610a25a2c361c33558b890a5184857655a012162eacee11"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./portfile.cmake",
+      "SPDXID": "SPDXRef-file-1",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "2ae4e5c121dea05a216857e6d7ed9ef4692e41fb65b8169106f79c36ccff61c3"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./vcpkg.json",
+      "SPDXID": "SPDXRef-file-2",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "060652b05e6eeac3d7d1a6bddb2bc90af4253bef3fc34f146261e8e6f1a71fbd"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "copyrightText": "NOASSERTION"
+    }
+  ]
+}
