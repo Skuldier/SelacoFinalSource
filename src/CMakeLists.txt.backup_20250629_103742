@@ -1360,48 +1360,6 @@ endif()
 
 if( UNIX )
 	find_package( Backtrace )
-
-# ===== Archipelago Support with vcpkg =====
-# Added by autopatcher on 2025-06-29 10:37:42
-# Find packages from vcpkg
-find_package(jsoncpp CONFIG REQUIRED)
-find_package(IXWebSocket CONFIG REQUIRED)
-
-# Archipelago library
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/archipelago/archipelago_socket.cpp")
-    add_library(archipelago STATIC
-        src/archipelago/archipelago_socket.cpp
-        src/archipelago/archipelago_commands.cpp
-    )
-    
-    # Include directories
-    target_include_directories(archipelago PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/archipelago
-    )
-    
-    # Link libraries from vcpkg
-    target_link_libraries(archipelago PUBLIC
-        JsonCpp::JsonCpp  # vcpkg provides this target
-        ixwebsocket::ixwebsocket
-    )
-    
-    # Windows-specific libraries
-    if(WIN32)
-        target_link_libraries(archipelago PUBLIC
-            ws2_32
-            crypt32
-            winhttp  # Sometimes needed for SSL
-        )
-    endif()
-    
-    message(STATUS "Archipelago support enabled using vcpkg libraries")
-    message(STATUS "  JsonCpp: Found")
-    message(STATUS "  IXWebSocket: Found")
-else()
-    message(WARNING "Archipelago source files not found in src/archipelago/")
-endif()
-
-
 	if(Backtrace_FOUND)
 		set( PROJECT_LIBRARIES ${PROJECT_LIBRARIES} ${Backtrace_LIBRARIES} )
 	endif()
@@ -1443,11 +1401,6 @@ else()
 endif()
 
 target_link_libraries( zdoom ${PROJECT_LIBRARIES} lzma ${ZMUSIC_LIBRARIES} )
-# Link Archipelago to main target
-if(TARGET archipelago)
-    target_link_libraries(zdoom PRIVATE archipelago)
-endif()
-
 
 include_directories(
 	BEFORE

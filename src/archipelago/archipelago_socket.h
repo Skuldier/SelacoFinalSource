@@ -1,33 +1,17 @@
 #pragma once
 
 #include <string>
-#include <vector>
-#include <thread>
 #include <queue>
 #include <mutex>
 #include <atomic>
-#include <cstdint>
-#include <set>
+#include <memory>
+#include <thread>
+#include <json/json.h>  // vcpkg style include
+#include <ixwebsocket/IXWebSocket.h>
 
-#ifdef _WIN32
-    #include <winsock2.h>
-    #include <ws2tcpip.h>
-    #pragma comment(lib, "ws2_32.lib")
-    typedef SOCKET socket_t;
-    #define INVALID_SOCKET_VALUE INVALID_SOCKET
-#else
-    #include <sys/socket.h>
-    #include <netinet/in.h>
-    #include <arpa/inet.h>
-    #include <unistd.h>
-    #include <netdb.h>
-    #include <errno.h>
-    typedef int socket_t;
-    #define INVALID_SOCKET_VALUE -1
-    #define INVALID_SOCKET -1
-    #define SOCKET_ERROR -1
-    #define closesocket close
-    #define WSAEWOULDBLOCK EWOULDBLOCK
+// Forward declare Printf if not available
+#ifndef Printf
+extern void Printf(const char* format, ...);
 #endif
 
 enum class ArchipelagoMessageType : uint8_t {
@@ -51,6 +35,7 @@ enum class ArchipelagoMessageType : uint8_t {
 struct ArchipelagoMessage {
     ArchipelagoMessageType type;
     std::string data;
+    Json::Value json;
 };
 
 class ArchipelagoSocket {
@@ -65,51 +50,49 @@ public:
     void Disconnect();
     
     bool SendMessage(const ArchipelagoMessage& msg);
+    bool SendJson(const Json::Value& json);
     bool ReceiveMessage(ArchipelagoMessage& msg);
     bool HasPendingMessages() const;
     
-    bool IsConnected() const { return m_connected; }
+    bool IsConnected() const { return m_connected && m_authenticated; }
+    bool IsSocketConnected() const { return m_connected; }
     std::string GetConnectionInfo() const;
     std::string GetLastError() const { return m_lastError; }
     std::string GetSlotName() const { return m_slotName; }
     
 private:
-    // WebSocket operations
-    bool PerformWebSocketHandshake();
-    bool SendWebSocketFrame(const std::string& data);
-    bool ReceiveWebSocketFrame(std::string& data);
-    bool SendPongFrame(const std::vector<uint8_t>& pingData);
-    std::string GenerateWebSocketKey();
-    uint32_t GenerateMaskingKey();
+    void OnMessage(const ix::WebSocketMessagePtr& msg);
+    void OnOpen();
+    void OnError(const std::string& error);
+    void OnClose();
     
-    // Archipelago protocol
     bool SendHandshake();
-    bool ProcessHandshakeResponse();
-    bool ParseJsonMessage(const std::string& json, ArchipelagoMessage& msg);
-    void ReceiverThreadFunc();
-    
-    // Socket helpers
-    bool SendRawData(const void* data, size_t size);
-    bool ReceiveRawData(void* data, size_t size);
-    void SetNonBlocking(bool enable);
+    bool ProcessMessage(const std::string& message);
+    bool WaitForConnection(int timeoutMs = 5000);
+    bool WaitForAuthentication(int timeoutMs = 30000);
     std::string GenerateUUID();
     
-    static bool InitializeSockets();
-    static void CleanupSockets();
-    
-    socket_t m_socket;
+    ix::WebSocket m_webSocket;
     std::atomic<bool> m_connected;
+    std::atomic<bool> m_authenticated;
+    std::atomic<bool> m_sslFailed;
+    
     std::string m_host;
     uint16_t m_port;
     std::string m_slotName;
     std::string m_password;
     std::string m_lastError;
     
-    std::thread m_recvThread;
-    std::atomic<bool> m_shouldStop;
+    // Server version info
+    int m_serverVersionMajor;
+    int m_serverVersionMinor;
+    int m_serverVersionBuild;
     
     std::queue<ArchipelagoMessage> m_recvQueue;
     mutable std::mutex m_recvMutex;
     
-    static int s_socketsInitialized;
+    Json::CharReaderBuilder m_jsonReaderBuilder;
+    Json::StreamWriterBuilder m_jsonWriterBuilder;
+    std::unique_ptr<Json::CharReader> m_jsonReader;
+    std::unique_ptr<Json::StreamWriter> m_jsonWriter;
 };
