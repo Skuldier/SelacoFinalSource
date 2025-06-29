@@ -1186,15 +1186,11 @@ set (PCH_SOURCES
 set(ARCHIPELAGO_SOURCES
     archipelago/archipelago_socket.cpp
     archipelago/archipelago_commands.cpp
-    archipelago/archipelago_selaco.cpp
 )
 
 set(ARCHIPELAGO_HEADERS
     archipelago/archipelago_socket.h
     archipelago/archipelago_integration.h
-    archipelago/archipelago_selaco.h
-    archipelago/archipelago_items.h
-    archipelago/archipelago_locations.h
 )
 
 
