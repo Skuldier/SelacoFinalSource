@@ -21,10 +21,13 @@
 #include "actor.h"
 #include "info.h"
 #include "d_event.h"
+#include "g_levellocals.h"
+#include "doomdef.h"
 
 // External references
 extern player_t players[MAXPLAYERS];
 extern int consoleplayer;
+extern FLevelLocals *primaryLevel;
 
 // Math utilities
 #ifndef MIN
@@ -286,7 +289,7 @@ static bool GiveInvulnerabilityToPlayer(player_t* player) {
     if (invulnClass) {
         AActor* powerup = player->mo->GiveInventoryType(invulnClass);
         if (powerup) {
-            powerup->IntVar(NAME_EffectTics) = 30 * TICRATE;
+            powerup->IntVar("EffectTics") = 30 * TICRATE;
             Printf(TEXTCOLOR_GOLD "Invulnerability activated!\n");
             return true;
         }
@@ -323,7 +326,7 @@ static bool GivePowerupToPlayer(player_t* player, const char* powerupName) {
     
     AActor* powerup = player->mo->GiveInventoryType(powerClass);
     if (powerup) {
-        powerup->IntVar(NAME_EffectTics) = 60 * TICRATE;
+        powerup->IntVar("EffectTics") = 60 * TICRATE;
         Printf(TEXTCOLOR_GOLD "Powerup activated: %s\n", powerupName);
         return true;
     }
@@ -389,8 +392,11 @@ static void EnableHealthRegeneration(player_t* player) {
 static void RevealFullMap(player_t* player) {
     if (!player) return;
     
-    player->cheats |= CF_ALLMAP;
-    Printf(TEXTCOLOR_GOLD "Full map revealed!\n");
+    // In GZDoom/Selaco, map reveal is done via level flags, not player cheats
+    if (player->mo && player->mo->Level) {
+        player->mo->Level->flags2 |= LEVEL2_ALLMAP;
+        Printf(TEXTCOLOR_GOLD "Full map revealed!\n");
+    }
 }
 
 static void HighlightSecrets(player_t* player) {
