@@ -6,9 +6,6 @@
 #include "d_player.h"
 #include "g_game.h"
 #include "gi.h"
-#include "a_pickups.h"
-#include "a_weapons.h"
-#include "a_keys.h"
 #include "p_local.h"
 #include "s_sound.h"
 #include "gstrings.h"
@@ -17,6 +14,10 @@
 #include "c_console.h"
 #include "d_net.h"
 #include "serializer.h"
+#include "actor.h"
+#include "info.h"
+#include "d_event.h"
+#include "namedef.h"
 #include <sstream>
 #include <algorithm>
 
@@ -28,6 +29,25 @@ extern int consoleplayer;
 #ifndef MIN
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #endif
+
+// Cheat flags - these values are from d_player.h
+enum {
+    CF_NOCLIP       = 1,      // No clipping, walk through barriers.
+    CF_ALLMAP       = 2,      // Automap shows everything
+    CF_GODMODE      = 4,      // Player is invulnerable
+    CF_NOMOMENTUM   = 8,      // Not really a cheat, just a debug aid.
+    CF_NOTARGET     = 16,     // [RH] Monsters don't target
+    CF_FLY          = 32,     // [RH] Flying player
+    CF_CHASECAM     = 64,     // [RH] Put camera behind player
+    CF_FROZEN       = 128,    // [RH] Don't let the player move
+    CF_REVERTPLEASE = 256,    // [RH] Stick camera in player's head if he moves
+    CF_STEPLEFT     = 512,    // [RH] Play left footstep sound next time
+    CF_FRIGHTENING  = 1024,   // [RH] Scare monsters away
+    CF_INSTANTWEAPSWITCH = 2048, // [RH] Switch weapons instantly
+    CF_TOTALLYFROZEN = 4096,  // [RH] All players can do is press +use
+    CF_PREDICTING   = 8192,   // [RH] Player movement is being predicted
+    CF_INTERPVIEW   = 16384,  // [RH] view was changed outside of input, so interpolate one frame
+};
 
 // Forward declarations of helper functions
 static bool GiveWeaponToPlayer(player_t* player, const char* weaponName);
@@ -211,7 +231,7 @@ static bool GiveWeaponToPlayer(player_t* player, const char* weaponName) {
         return false;
     }
     
-    AWeapon* weapon = static_cast<AWeapon*>(player->mo->GiveInventoryType(weaponClass));
+    AActor* weapon = player->mo->GiveInventoryType(weaponClass);
     if (weapon) {
         Printf(TEXTCOLOR_GOLD "Received weapon: %s\n", weaponName);
         return true;
@@ -228,12 +248,13 @@ static bool GiveAmmoToPlayer(player_t* player, const char* ammoType, int amount)
         return false;
     }
     
-    AInventory* ammo = player->mo->FindInventory(ammoClass);
+    AActor* ammo = player->mo->FindInventory(ammoClass);
     if (!ammo) {
-        ammo = static_cast<AInventory*>(player->mo->GiveInventoryType(ammoClass));
+        ammo = player->mo->GiveInventoryType(ammoClass);
     }
     
     if (ammo) {
+        // Use the engine's method to add ammo properly
         ammo->IntVar(NAME_Amount) = MIN(ammo->IntVar(NAME_Amount) + amount, ammo->IntVar(NAME_MaxAmount));
         Printf(TEXTCOLOR_GOLD "Received %d %s\n", amount, ammoType);
         return true;
@@ -259,7 +280,7 @@ static bool GiveArmorToPlayer(player_t* player, const char* armorType, int amoun
         return false;
     }
     
-    AInventory* armor = static_cast<AInventory*>(player->mo->GiveInventoryType(armorClass));
+    AActor* armor = player->mo->GiveInventoryType(armorClass);
     if (armor) {
         Printf(TEXTCOLOR_GOLD "Received %s\n", armorType);
         return true;
@@ -281,7 +302,7 @@ static bool GiveInvulnerabilityToPlayer(player_t* player) {
     
     PClassActor* invulnClass = PClass::FindActor("PowerInvulnerable");
     if (invulnClass) {
-        APowerup* powerup = static_cast<APowerup*>(player->mo->GiveInventoryType(invulnClass));
+        AActor* powerup = player->mo->GiveInventoryType(invulnClass);
         if (powerup) {
             powerup->IntVar(NAME_EffectTics) = 30 * TICRATE;
             Printf(TEXTCOLOR_GOLD "Invulnerability activated!\n");
@@ -300,7 +321,7 @@ static bool GiveKeyToPlayer(player_t* player, const char* keyName) {
         return false;
     }
     
-    AInventory* key = static_cast<AInventory*>(player->mo->GiveInventoryType(keyClass));
+    AActor* key = player->mo->GiveInventoryType(keyClass);
     if (key) {
         Printf(TEXTCOLOR_GOLD "Received %s\n", keyName);
         return true;
@@ -318,7 +339,7 @@ static bool GivePowerupToPlayer(player_t* player, const char* powerupName) {
         return false;
     }
     
-    APowerup* powerup = static_cast<APowerup*>(player->mo->GiveInventoryType(powerClass));
+    AActor* powerup = player->mo->GiveInventoryType(powerClass);
     if (powerup) {
         powerup->IntVar(NAME_EffectTics) = 60 * TICRATE;
         Printf(TEXTCOLOR_GOLD "Powerup activated: %s\n", powerupName);
