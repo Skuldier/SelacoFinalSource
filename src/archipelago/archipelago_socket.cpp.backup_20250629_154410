@@ -13,7 +13,12 @@ EXTERN_CVAR(Bool, archipelago_debug)
 
 // If Printf isn't available, define a simple version
 #ifndef Printf
-
+void Printf(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+}
 #endif
 
 // If color constants aren't defined

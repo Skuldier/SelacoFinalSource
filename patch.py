@@ -1,315 +1,434 @@
 #!/usr/bin/env python3
 """
-CMakeLists.txt Autopatcher for Archipelago with vcpkg
-This script automatically adds the necessary configuration to your CMakeLists.txt
+Archipelago Socket Implementation Auto-Patcher
+Automatically fixes compilation errors in the Archipelago socket implementation
 """
 
 import os
 import re
 import shutil
-import argparse
 from datetime import datetime
+from typing import List, Tuple
 
-class CMakeAutopatcher:
-    def __init__(self, cmake_path):
-        self.cmake_path = cmake_path
-        self.content = ""
-        self.main_target = None
+class ArchipelagoPatcher:
+    def __init__(self, base_path: str = "."):
+        self.base_path = base_path
+        self.fixes_applied = []
         
-    def read_file(self):
-        """Read the CMakeLists.txt file"""
-        with open(self.cmake_path, 'r', encoding='utf-8') as f:
-            self.content = f.read()
-            
-    def backup_file(self):
-        """Create a timestamped backup"""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        backup_path = f"{self.cmake_path}.backup_{timestamp}"
-        shutil.copy2(self.cmake_path, backup_path)
+    def backup_file(self, filepath: str):
+        """Create a backup of the file before patching"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{filepath}.backup_{timestamp}"
+        shutil.copy2(filepath, backup_path)
         print(f"✓ Created backup: {backup_path}")
-        return backup_path
         
-    def find_main_target(self):
-        """Find the main executable/library target"""
-        # Look for add_executable
-        exe_pattern = r'add_executable\s*\(\s*([^\s\)]+)'
-        exe_matches = re.findall(exe_pattern, self.content)
-        
-        # Look for add_library that might be the main target
-        lib_pattern = r'add_library\s*\(\s*([^\s\)]+)'
-        lib_matches = re.findall(lib_pattern, self.content)
-        
-        # Common game/engine target names
-        common_names = ['zdoom', 'gzdoom', 'selaco', 'game', 'engine', 'main']
-        
-        # Check executables first
-        for match in exe_matches:
-            if any(name in match.lower() for name in common_names):
-                self.main_target = match
-                return match
-                
-        # Check libraries
-        for match in lib_matches:
-            if any(name in match.lower() for name in common_names):
-                self.main_target = match
-                return match
-                
-        # Fall back to first executable
-        if exe_matches:
-            self.main_target = exe_matches[0]
-            return exe_matches[0]
+    def read_file(self, filepath: str) -> str:
+        """Read file content"""
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read()
             
-        # Fall back to project name
-        project_pattern = r'project\s*\(\s*([^\s\)]+)'
-        project_matches = re.findall(project_pattern, self.content)
-        if project_matches:
-            self.main_target = project_matches[0]
-            return project_matches[0]
+    def write_file(self, filepath: str, content: str):
+        """Write content to file"""
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(content)
             
-        return None
+    def patch_archipelago_socket_h(self):
+        """Fix archipelago_socket.h"""
+        filepath = os.path.join(self.base_path, "src/archipelago/archipelago_socket.h")
+        if not os.path.exists(filepath):
+            print(f"✗ File not found: {filepath}")
+            return False
+            
+        print(f"\n📝 Patching {filepath}...")
+        self.backup_file(filepath)
         
-    def check_existing_config(self):
-        """Check if Archipelago is already configured"""
-        indicators = [
-            'archipelago',
-            'IXWebSocket',
-            'jsoncpp CONFIG REQUIRED',
-            'ixwebsocket::ixwebsocket'
-        ]
+        content = self.read_file(filepath)
+        original_content = content
         
-        return any(indicator in self.content for indicator in indicators)
+        # Fix 1: Update Windows includes section with SendMessage undef
+        windows_section_pattern = r'(#ifdef _WIN32\s*\n.*?#pragma comment\(lib, "ws2_32\.lib"\)\s*\n)(.*?typedef SOCKET socket_t;)'
+        windows_replacement = r'''\1    
+    // Undefine Windows macros that conflict with our method names
+    #ifdef SendMessage
+        #undef SendMessage
+    #endif
+    
+    \2'''
+        content = re.sub(windows_section_pattern, windows_replacement, content, flags=re.DOTALL)
         
-    def find_insertion_point(self):
-        """Find the best place to insert the configuration"""
-        # Try to find the last find_package
-        find_package_pattern = r'(find_package\s*\([^)]+\))'
-        matches = list(re.finditer(find_package_pattern, self.content))
-        if matches:
-            last_match = matches[-1]
-            return last_match.end()
-            
-        # Try after project()
-        project_pattern = r'(project\s*\([^)]+\))'
-        match = re.search(project_pattern, self.content)
-        if match:
-            return match.end()
-            
-        # Try after cmake_minimum_required
-        cmake_min_pattern = r'(cmake_minimum_required\s*\([^)]+\))'
-        match = re.search(cmake_min_pattern, self.content)
-        if match:
-            return match.end()
-            
-        # Default to end of file
-        return len(self.content)
+        # Fix 2: Update non-Windows section with additional defines
+        nonwindows_pattern = r'(#else\s*\n.*?#define WSAEWOULDBLOCK EWOULDBLOCK\s*\n)(#endif)'
+        nonwindows_replacement = r'''\1    #define ioctlsocket ioctl
+    #define SOCKET int
+    #define DWORD unsigned long
+    #define WSAETIMEDOUT ETIMEDOUT
+\2'''
+        content = re.sub(nonwindows_pattern, nonwindows_replacement, content, flags=re.DOTALL)
         
-    def find_target_link_position(self):
-        """Find where to add target_link_libraries for archipelago"""
-        if not self.main_target:
-            return None
-            
-        # Find existing target_link_libraries for the main target
-        pattern = rf'(target_link_libraries\s*\(\s*{re.escape(self.main_target)}[^)]+\))'
-        matches = list(re.finditer(pattern, self.content, re.MULTILINE | re.DOTALL))
+        # Fix 3: Add missing include for non-Windows
+        nonwindows_includes = r'(#include <errno\.h>\s*\n)'
+        content = re.sub(nonwindows_includes, r'\1    #include <sys/ioctl.h>\n', content)
         
-        if matches:
-            # Insert after the last one
-            return matches[-1].end()
-            
-        # Find where the target is defined
-        target_pattern = rf'(add_(?:executable|library)\s*\(\s*{re.escape(self.main_target)}[^)]+\))'
-        match = re.search(target_pattern, self.content, re.MULTILINE | re.DOTALL)
-        if match:
-            return match.end()
-            
-        return None
+        # Fix 4: Add missing private members and methods
+        # Find the private section and add missing members
+        private_section_pattern = r'(mutable std::mutex m_recvMutex;\s*\n\s*\n\s*static int s_socketsInitialized;\s*\n)(};)'
         
-    def generate_archipelago_config(self):
-        """Generate the Archipelago configuration"""
-        config = '''
+        missing_members = """    
+    // Additional private members
+    bool m_authenticated;
+    bool m_sslFailed;
+    
+    // Additional private methods
+    void OnMessage(const std::string& message);
+    void OnOpen();
+    void OnError(const std::string& error);
+    void OnClose();
+    void ProcessMessage(const std::string& message);
+    bool SendJson(const std::string& json);
+"""
+        
+        content = re.sub(private_section_pattern, r'\1' + missing_members + r'\n\2', content)
+        
+        if content != original_content:
+            self.write_file(filepath, content)
+            self.fixes_applied.append(f"archipelago_socket.h - Added missing members and Windows fixes")
+            print("✓ Fixed archipelago_socket.h")
+            return True
+        else:
+            print("⚠ No changes needed for archipelago_socket.h")
+            return False
+            
+    def patch_archipelago_socket_cpp(self):
+        """Fix archipelago_socket.cpp"""
+        filepath = os.path.join(self.base_path, "src/archipelago/archipelago_socket.cpp")
+        if not os.path.exists(filepath):
+            print(f"✗ File not found: {filepath}")
+            return False
+            
+        print(f"\n📝 Patching {filepath}...")
+        self.backup_file(filepath)
+        
+        content = self.read_file(filepath)
+        original_content = content
+        
+        # Fix 1: Remove Printf redefinition (if it exists)
+        # Look for void Printf definition and remove it
+        printf_pattern = r'void\s+Printf\s*\([^)]*\)\s*{[^}]*}'
+        content = re.sub(printf_pattern, '', content)
+        
+        # Fix 2: Add sys/ioctl.h include for non-Windows
+        ifndef_pattern = r'(#ifndef _WIN32\s*\n#include <fcntl\.h>\s*\n)'
+        content = re.sub(ifndef_pattern, r'\1#include <sys/ioctl.h>\n', content)
+        
+        # Fix 3: Fix constructor to initialize new members
+        constructor_pattern = r'(ArchipelagoSocket::ArchipelagoSocket\(\)\s*\n\s*:\s*m_socket\(INVALID_SOCKET\)\s*\n\s*,\s*m_connected\(false\)\s*\n\s*,\s*m_port\(0\)\s*\n\s*,\s*m_shouldStop\(false\))\s*{'
+        constructor_replacement = r'''\1
+    , m_authenticated(false)
+    , m_sslFailed(false) {'''
+        content = re.sub(constructor_pattern, constructor_replacement, content)
+        
+        # Fix 4: Add missing method implementations at the end of file
+        if 'void ArchipelagoSocket::OnMessage' not in content:
+            missing_methods = '''
+// Missing method implementations
+void ArchipelagoSocket::OnMessage(const std::string& message) {
+    if (archipelago_debug) {
+        Printf("OnMessage: %s\\n", message.c_str());
+    }
+    ProcessMessage(message);
+}
 
-# ===== Archipelago Support with vcpkg =====
-# Added by autopatcher on {}
-# Find packages from vcpkg
-find_package(jsoncpp CONFIG REQUIRED)
-find_package(IXWebSocket CONFIG REQUIRED)
+void ArchipelagoSocket::OnOpen() {
+    Printf("WebSocket connection opened\\n");
+    m_connected = true;
+}
 
-# Archipelago library
-if(EXISTS "${{CMAKE_CURRENT_SOURCE_DIR}}/src/archipelago/archipelago_socket.cpp")
-    add_library(archipelago STATIC
-        src/archipelago/archipelago_socket.cpp
-        src/archipelago/archipelago_commands.cpp
-    )
+void ArchipelagoSocket::OnError(const std::string& error) {
+    Printf("WebSocket error: %s\\n", error.c_str());
+    m_lastError = error;
     
-    # Include directories
-    target_include_directories(archipelago PUBLIC
-        ${{CMAKE_CURRENT_SOURCE_DIR}}/src/archipelago
-    )
-    
-    # Link libraries from vcpkg
-    target_link_libraries(archipelago PUBLIC
-        JsonCpp::JsonCpp  # vcpkg provides this target
-        ixwebsocket::ixwebsocket
-    )
-    
-    # Windows-specific libraries
-    if(WIN32)
-        target_link_libraries(archipelago PUBLIC
-            ws2_32
-            crypt32
-            winhttp  # Sometimes needed for SSL
-        )
-    endif()
-    
-    message(STATUS "Archipelago support enabled using vcpkg libraries")
-    message(STATUS "  JsonCpp: Found")
-    message(STATUS "  IXWebSocket: Found")
-else()
-    message(WARNING "Archipelago source files not found in src/archipelago/")
-endif()
+    // Check for SSL-specific errors
+    if (error.find("SSL") != std::string::npos || 
+        error.find("certificate") != std::string::npos) {
+        m_sslFailed = true;
+    }
+}
 
-'''.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+void ArchipelagoSocket::OnClose() {
+    Printf("WebSocket connection closed\\n");
+    m_connected = false;
+    m_authenticated = false;
+}
+
+void ArchipelagoSocket::ProcessMessage(const std::string& message) {
+    // This method processes incoming WebSocket messages
+    // Parse and handle the message appropriately
+    ArchipelagoMessage msg;
+    if (ParseJsonMessage(message, msg)) {
+        std::lock_guard<std::mutex> lock(m_recvMutex);
+        m_recvQueue.push(msg);
+    }
+}
+
+bool ArchipelagoSocket::SendJson(const std::string& json) {
+    return SendWebSocketFrame(json);
+}
+'''
+            # Add before the final closing brace or at the end
+            content = content.rstrip() + missing_methods
         
-        return config
-        
-    def generate_target_link(self):
-        """Generate the target_link_libraries line"""
-        if not self.main_target:
-            return ""
+        if content != original_content:
+            self.write_file(filepath, content)
+            self.fixes_applied.append(f"archipelago_socket.cpp - Removed Printf, added methods")
+            print("✓ Fixed archipelago_socket.cpp")
+            return True
+        else:
+            print("⚠ No changes needed for archipelago_socket.cpp")
+            return False
             
-        return f'''
-# Link Archipelago to main target
-if(TARGET archipelago)
-    target_link_libraries({self.main_target} PRIVATE archipelago)
-endif()
+    def patch_archipelago_commands_cpp(self):
+        """Fix archipelago_commands.cpp"""
+        filepath = os.path.join(self.base_path, "src/archipelago/archipelago_commands.cpp")
+        if not os.path.exists(filepath):
+            print(f"✗ File not found: {filepath}")
+            return False
+            
+        print(f"\n📝 Patching {filepath}...")
+        self.backup_file(filepath)
+        
+        content = self.read_file(filepath)
+        original_content = content
+        
+        # Fix 1: Add Windows socket headers after existing includes
+        includes_pattern = r'(#include <sstream>\s*\n)'
+        socket_includes = r'''\1
+// Add socket headers for raw test command
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #pragma comment(lib, "ws2_32.lib")
+#else
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <unistd.h>
+    #include <netdb.h>
+    #define SOCKET int
+    #define INVALID_SOCKET -1
+    #define SOCKET_ERROR -1
+    #define closesocket close
+    #define WSAETIMEDOUT ETIMEDOUT
+    #define DWORD unsigned long
+#endif
+
+'''
+        content = re.sub(includes_pattern, socket_includes, content)
+        
+        # Fix 2: Fix the broken Cmd_archipelago_test_raw function
+        # First, remove any broken version
+        broken_pattern = r'// Console command for raw Archipelago test\s*\nCCMD.*?(?=(?:CCMD|CVAR|$))'
+        content = re.sub(broken_pattern, '', content, flags=re.DOTALL)
+        
+        # Remove any trailing broken code
+        broken_end_pattern = r'Printf\("Testing raw Archipelago connection.*?Cmd_archipelago_help.*?$'
+        content = re.sub(broken_end_pattern, '', content, flags=re.DOTALL)
+        
+        # Add the correct implementation at the end
+        correct_implementation = '''
+// Console command for raw Archipelago test
+CCMD(archipelago_test_raw)
+{
+    Printf("Testing raw Archipelago connection...\\n");
+    
+    // Test basic socket operations
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        Printf("WSAStartup failed\\n");
+        return;
+    }
+#endif
+    
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) {
+        Printf("Failed to create socket\\n");
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return;
+    }
+    
+    // Set timeout
+#ifdef _WIN32
+    DWORD timeout = 5000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+#else
+    struct timeval tv;
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
+    
+    const char* host = "localhost";
+    int port = 38281;
+    
+    struct hostent* hostinfo = gethostbyname(host);
+    if (!hostinfo) {
+        Printf("Failed to resolve hostname\\n");
+        closesocket(sock);
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return;
+    }
+    
+    sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr = *((struct in_addr*)hostinfo->h_addr);
+    
+    if (connect(sock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        Printf("Failed to connect\\n");
+        closesocket(sock);
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return;
+    }
+    
+    Printf("Connected! Sending WebSocket upgrade...\\n");
+    
+    // Send WebSocket upgrade request
+    const char* request = 
+        "GET / HTTP/1.1\\r\\n"
+        "Host: localhost:38281\\r\\n"
+        "Upgrade: websocket\\r\\n"
+        "Connection: Upgrade\\r\\n"
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\n"
+        "Sec-WebSocket-Version: 13\\r\\n"
+        "\\r\\n";
+    
+    if (send(sock, request, strlen(request), 0) == SOCKET_ERROR) {
+        Printf("Failed to send upgrade request\\n");
+        closesocket(sock);
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return;
+    }
+    
+    // Read response
+    char buffer[1024];
+    int received = recv(sock, buffer, sizeof(buffer)-1, 0);
+    if (received > 0) {
+        buffer[received] = '\\0';
+        Printf("Received response:\\n%s\\n", buffer);
+        
+        if (strstr(buffer, "101 Switching Protocols")) {
+            Printf("WebSocket upgrade successful!\\n");
+        } else {
+            Printf("WebSocket upgrade failed\\n");
+        }
+    } else {
+        if (received == 0) {
+            Printf("Connection closed by server\\n");
+        } else {
+#ifdef _WIN32
+            int error = WSAGetLastError();
+            if (error == WSAETIMEDOUT) {
+                Printf("Connection timed out\\n");
+            } else {
+                Printf("Receive failed with error: %d\\n", error);
+            }
+#else
+            Printf("Receive failed\\n");
+#endif
+        }
+    }
+    
+    closesocket(sock);
+    
+#ifdef _WIN32
+    WSACleanup();
+#endif
+    
+    Printf("Test complete\\n");
+}
+
+// Console command for help
+CCMD(archipelago_help)
+{
+    Printf("Archipelago commands:\\n");
+    Printf("  archipelago_connect - Connect to Archipelago server\\n");
+    Printf("  archipelago_disconnect - Disconnect from server\\n");
+    Printf("  archipelago_status - Show connection status\\n");
+    Printf("  archipelago_send <message> - Send a message\\n");
+    Printf("  archipelago_test_raw - Test raw socket connection\\n");
+    Printf("\\nCVars:\\n");
+    Printf("  archipelago_host - Server hostname (default: localhost)\\n");
+    Printf("  archipelago_port - Server port (default: 38281)\\n");
+    Printf("  archipelago_slot - Slot name\\n");
+    Printf("  archipelago_password - Password (optional)\\n");
+    Printf("  archipelago_autoconnect - Auto-connect on startup\\n");
+    Printf("  archipelago_debug - Enable debug messages\\n");
+}
 '''
         
-    def apply_patch(self):
-        """Apply the patch to CMakeLists.txt"""
-        # Insert main configuration
-        insertion_point = self.find_insertion_point()
-        config = self.generate_archipelago_config()
+        # Ensure content ends properly and add the implementations
+        content = content.rstrip() + '\n' + correct_implementation
         
-        # Insert the configuration
-        new_content = (
-            self.content[:insertion_point] + 
-            config + 
-            self.content[insertion_point:]
-        )
-        
-        # Add target linking if we found a main target
-        if self.main_target:
-            link_position = self.find_target_link_position()
-            if link_position:
-                target_link = self.generate_target_link()
-                # Adjust position for the already inserted config
-                adjusted_position = link_position + len(config)
-                new_content = (
-                    new_content[:adjusted_position] + 
-                    target_link + 
-                    new_content[adjusted_position:]
-                )
-        
-        # Write the modified content
-        with open(self.cmake_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
+        if content != original_content:
+            self.write_file(filepath, content)
+            self.fixes_applied.append(f"archipelago_commands.cpp - Added socket headers and fixed commands")
+            print("✓ Fixed archipelago_commands.cpp")
+            return True
+        else:
+            print("⚠ No changes needed for archipelago_commands.cpp")
+            return False
             
-        print(f"✓ Successfully patched {self.cmake_path}")
-        
     def run(self):
-        """Run the autopatcher"""
-        print("Archipelago CMakeLists.txt Autopatcher")
+        """Run all patches"""
+        print("🚀 Archipelago Socket Auto-Patcher")
         print("=" * 50)
         
-        # Read the file
-        self.read_file()
-        print(f"✓ Read {self.cmake_path}")
+        # Check if we're in the right directory
+        if not os.path.exists(os.path.join(self.base_path, "src/archipelago")):
+            print("❌ Error: Cannot find src/archipelago directory!")
+            print("   Please run this script from the SelacoFinalSource root directory")
+            return False
+            
+        success = True
         
-        # Check if already configured
-        if self.check_existing_config():
-            print("\n⚠ Warning: CMakeLists.txt appears to already have Archipelago configuration.")
-            response = input("Continue anyway? (y/n): ")
-            if response.lower() != 'y':
-                print("Aborted.")
-                return False
-                
-        # Find main target
-        target = self.find_main_target()
-        if target:
-            print(f"✓ Found main target: {target}")
-        else:
-            print("⚠ Could not detect main target automatically")
-            target = input("Enter your main target name (or press Enter to skip): ").strip()
-            if target:
-                self.main_target = target
-                
-        # Create backup
-        self.backup_file()
-        
-        # Apply patch
-        self.apply_patch()
+        # Apply all patches
+        success &= self.patch_archipelago_socket_h()
+        success &= self.patch_archipelago_socket_cpp()
+        success &= self.patch_archipelago_commands_cpp()
         
         print("\n" + "=" * 50)
-        print("✅ Patching complete!")
-        print("\nNext steps:")
-        print("1. Make sure vcpkg is installed and integrated")
-        print("2. Run: vcpkg install jsoncpp:x64-windows ixwebsocket:x64-windows")
-        print("3. Configure CMake with vcpkg toolchain:")
-        print('   cmake -B build -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake"')
-        print("4. Build your project")
+        if self.fixes_applied:
+            print("✅ Patching complete! Fixes applied:")
+            for fix in self.fixes_applied:
+                print(f"   • {fix}")
+        else:
+            print("⚠️  No fixes were needed - files may already be patched")
+            
+        print("\n💡 Next steps:")
+        print("   1. Review the changes (backups were created)")
+        print("   2. Rebuild the project")
+        print("   3. If build still fails, check the error messages")
         
-        return True
-
-def find_cmake_file(start_path='.'):
-    """Find CMakeLists.txt in current or parent directories"""
-    current = os.path.abspath(start_path)
-    while current != os.path.dirname(current):
-        cmake_path = os.path.join(current, 'CMakeLists.txt')
-        if os.path.exists(cmake_path):
-            return cmake_path
-        current = os.path.dirname(current)
-    return None
+        return success
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Automatically patch CMakeLists.txt for Archipelago support with vcpkg'
-    )
-    parser.add_argument(
-        'cmake_file', 
-        nargs='?', 
-        help='Path to CMakeLists.txt (auto-detected if not specified)'
-    )
-    parser.add_argument(
-        '--target', '-t',
-        help='Main target name to link archipelago with'
-    )
-    args = parser.parse_args()
+    import sys
     
-    # Find CMakeLists.txt
-    if args.cmake_file:
-        cmake_path = args.cmake_file
-    else:
-        cmake_path = find_cmake_file()
-        if not cmake_path:
-            print("❌ Could not find CMakeLists.txt in current or parent directories.")
-            cmake_path = input("Enter path to CMakeLists.txt: ").strip()
-            
-    if not os.path.exists(cmake_path):
-        print(f"❌ Error: {cmake_path} does not exist")
-        return 1
-        
-    # Run the patcher
-    patcher = CMakeAutopatcher(cmake_path)
+    # Allow specifying base path as argument
+    base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     
-    if args.target:
-        patcher.main_target = args.target
-        
-    try:
-        success = patcher.run()
-        return 0 if success else 1
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        return 1
+    patcher = ArchipelagoPatcher(base_path)
+    success = patcher.run()
+    
+    sys.exit(0 if success else 1)
 
-if __name__ == '__main__':
-    exit(main())
+if __name__ == "__main__":
+    main()
