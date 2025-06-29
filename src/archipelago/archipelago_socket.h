@@ -11,7 +11,6 @@
 
 // Forward declare Printf if not available
 #ifndef Printf
-extern void Printf(const char* format, ...);
 #endif
 
 enum class ArchipelagoMessageType : uint8_t {
@@ -47,7 +46,6 @@ public:
     bool Connect(const std::string& host, uint16_t port, 
                  const std::string& slotName, 
                  const std::string& password = "");
-    void Disconnect();
     
     bool SendMessage(const ArchipelagoMessage& msg);
     bool SendJson(const Json::Value& json);
@@ -61,10 +59,6 @@ public:
     std::string GetSlotName() const { return m_slotName; }
     
 private:
-    void OnMessage(const ix::WebSocketMessagePtr& msg);
-    void OnOpen();
-    void OnError(const std::string& error);
-    void OnClose();
     
     bool SendHandshake();
     bool ProcessMessage(const std::string& message);

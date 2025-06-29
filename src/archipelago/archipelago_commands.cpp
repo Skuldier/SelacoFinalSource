@@ -416,14 +416,7 @@ CCMD(archipelago_test_raw) {
     
     Printf("\n=== Test Complete ===\n");
 }
-
-// Simple version that uses current settings
-CCMD(archipelago_test) {
-    if (strlen(archipelago_host) == 0) {
-        Printf("Please set archipelago_host first\n");
-        return;
-    }
-    
+   
     Printf("Testing connection to %s:%d...\n", 
            (const char*)archipelago_host, (int)archipelago_port);
     
