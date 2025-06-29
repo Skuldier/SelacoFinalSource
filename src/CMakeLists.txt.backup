@@ -1,4 +1,4 @@
-﻿cmake_minimum_required( VERSION 3.16.0 )
+cmake_minimum_required( VERSION 3.16.0 )
 
 include(precompiled_headers)
 
@@ -47,14 +47,6 @@ endif()
 
 if( NOT PROJECT_LIBRARIES )
 	set( PROJECT_LIBRARIES "" )
-
-# Add Archipelago libraries if enabled
-if(ARCHIPELAGO_ENABLED)
-    list(APPEND PROJECT_LIBRARIES ${ARCHIPELAGO_LIBRARIES})
-    if(ARCHIPELAGO_INCLUDE_DIRS)
-        include_directories(${ARCHIPELAGO_INCLUDE_DIRS})
-    endif()
-endif()
 
 # Add mbedTLS to project libraries
 list(APPEND PROJECT_LIBRARIES ${MBEDTLS_LIBRARIES})
@@ -1271,81 +1263,16 @@ set (PCH_SOURCES
 	utility/nodebuilder/nodebuild_gl.cpp
 	utility/nodebuilder/nodebuild_utility.cpp
 )
-# Archipelago support option
-option(NO_ARCHIPELAGO "Disable Archipelago multiworld support" OFF)
+# Archipelago integration sources
+set(ARCHIPELAGO_SOURCES
+    archipelago/archipelago_socket.cpp
+    archipelago/archipelago_commands.cpp
+)
 
-if(NOT NO_ARCHIPELAGO)
-    # Check if source files exist
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/archipelago/archipelago_socket.cpp")
-        # Try to find jsoncpp
-        find_package(jsoncpp CONFIG QUIET)
-        if(NOT jsoncpp_FOUND)
-            find_package(PkgConfig QUIET)
-            if(PkgConfig_FOUND)
-                pkg_check_modules(JSONCPP jsoncpp)
-            endif()
-        endif()
-
-        # Try to find ixwebsocket
-        find_package(ixwebsocket CONFIG QUIET)
-        
-        if(jsoncpp_FOUND OR JSONCPP_FOUND)
-            message(STATUS "Found jsoncpp for Archipelago support")
-            
-            # Set up jsoncpp includes and libraries
-            if(jsoncpp_FOUND)
-                # vcpkg style
-                set(ARCHIPELAGO_LIBRARIES jsoncpp_lib)
-            elseif(JSONCPP_FOUND)
-                # pkg-config style
-                set(ARCHIPELAGO_INCLUDE_DIRS ${JSONCPP_INCLUDE_DIRS})
-                set(ARCHIPELAGO_LIBRARIES ${JSONCPP_LIBRARIES})
-            endif()
-            
-            # Add ixwebsocket if found
-            if(ixwebsocket_FOUND)
-                message(STATUS "Found ixwebsocket for Archipelago support")
-                list(APPEND ARCHIPELAGO_LIBRARIES ixwebsocket::ixwebsocket)
-            else()
-                message(WARNING "ixwebsocket not found - Archipelago WebSocket support may be limited")
-            endif()
-            
-            # Define Archipelago sources
-            set(ARCHIPELAGO_SOURCES
-                archipelago/archipelago_socket.cpp
-                archipelago/archipelago_commands.cpp
-            )
-
-            set(ARCHIPELAGO_HEADERS
-                archipelago/archipelago_socket.h
-                archipelago/archipelago_integration.h
-            )
-            
-            # Add to the build
-            set(ARCHIPELAGO_ENABLED TRUE)
-            add_definitions(-DARCHIPELAGO_SUPPORT)
-            
-        else()
-            message(WARNING "jsoncpp not found - Archipelago support will be disabled")
-            message(WARNING "To enable Archipelago support, install jsoncpp via vcpkg:")
-            message(WARNING "  vcpkg install jsoncpp:x64-windows ixwebsocket:x64-windows")
-            set(ARCHIPELAGO_SOURCES "")
-            set(ARCHIPELAGO_HEADERS "")
-            set(ARCHIPELAGO_ENABLED FALSE)
-        endif()
-    else()
-        message(WARNING "Archipelago source files not found in src/archipelago/")
-        set(ARCHIPELAGO_SOURCES "")
-        set(ARCHIPELAGO_HEADERS "")
-        set(ARCHIPELAGO_ENABLED FALSE)
-    endif()
-else()
-    message(STATUS "Archipelago support disabled by NO_ARCHIPELAGO option")
-    set(ARCHIPELAGO_SOURCES "")
-    set(ARCHIPELAGO_HEADERS "")
-    set(ARCHIPELAGO_ENABLED FALSE)
-endif()
-
+set(ARCHIPELAGO_HEADERS
+    archipelago/archipelago_socket.h
+    archipelago/archipelago_integration.h
+)
 
 
 if( ${HAVE_VM_JIT} )

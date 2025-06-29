@@ -1,0 +1,222 @@
+@echo off
+setlocal enabledelayedexpansion
+
+:: =====================================================
+:: ULTRATHINK CMAKE AUTOPATCHER FOR ARCHIPELAGO SUPPORT
+:: =====================================================
+
+echo.
+echo ========================================================
+echo   CMakeLists.txt AUTOPATCHER - ARCHIPELAGO INTEGRATION
+echo ========================================================
+echo.
+
+:: Set the CMakeLists.txt path
+set CMAKE_FILE=src\CMakeLists.txt
+set BACKUP_FILE=src\CMakeLists.txt.backup
+set TEMP_FILE=src\CMakeLists.txt.tmp
+
+:: Check if CMakeLists.txt exists
+if not exist "%CMAKE_FILE%" (
+    echo [ERROR] %CMAKE_FILE% not found!
+    echo Please run this from the root directory of your project.
+    pause
+    exit /b 1
+)
+
+:: Check if already patched
+findstr /C:"NO_ARCHIPELAGO" "%CMAKE_FILE%" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [INFO] CMakeLists.txt appears to already have Archipelago support!
+    set /p REPATCH="Do you want to re-apply the patch? (y/n): "
+    if /i "!REPATCH!" neq "y" (
+        echo [INFO] Patch cancelled.
+        pause
+        exit /b 0
+    )
+)
+
+:: Create backup
+echo [*] Creating backup: %BACKUP_FILE%
+copy "%CMAKE_FILE%" "%BACKUP_FILE%" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Failed to create backup!
+    pause
+    exit /b 1
+)
+
+:: Create the patch content in a temporary file
+echo [*] Generating patch content...
+(
+echo # Archipelago support option
+echo option^(NO_ARCHIPELAGO "Disable Archipelago multiworld support" OFF^)
+echo.
+echo if^(NOT NO_ARCHIPELAGO^)
+echo     # Check if source files exist
+echo     if^(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/archipelago/archipelago_socket.cpp"^)
+echo         # Try to find jsoncpp
+echo         find_package^(jsoncpp CONFIG QUIET^)
+echo         if^(NOT jsoncpp_FOUND^)
+echo             find_package^(PkgConfig QUIET^)
+echo             if^(PkgConfig_FOUND^)
+echo                 pkg_check_modules^(JSONCPP jsoncpp^)
+echo             endif^(^)
+echo         endif^(^)
+echo.
+echo         # Try to find ixwebsocket
+echo         find_package^(ixwebsocket CONFIG QUIET^)
+echo         
+echo         if^(jsoncpp_FOUND OR JSONCPP_FOUND^)
+echo             message^(STATUS "Found jsoncpp for Archipelago support"^)
+echo             
+echo             # Set up jsoncpp includes and libraries
+echo             if^(jsoncpp_FOUND^)
+echo                 # vcpkg style
+echo                 set^(ARCHIPELAGO_LIBRARIES jsoncpp_lib^)
+echo             elseif^(JSONCPP_FOUND^)
+echo                 # pkg-config style
+echo                 set^(ARCHIPELAGO_INCLUDE_DIRS ${JSONCPP_INCLUDE_DIRS}^)
+echo                 set^(ARCHIPELAGO_LIBRARIES ${JSONCPP_LIBRARIES}^)
+echo             endif^(^)
+echo             
+echo             # Add ixwebsocket if found
+echo             if^(ixwebsocket_FOUND^)
+echo                 message^(STATUS "Found ixwebsocket for Archipelago support"^)
+echo                 list^(APPEND ARCHIPELAGO_LIBRARIES ixwebsocket::ixwebsocket^)
+echo             else^(^)
+echo                 message^(WARNING "ixwebsocket not found - Archipelago WebSocket support may be limited"^)
+echo             endif^(^)
+echo             
+echo             # Define Archipelago sources
+echo             set^(ARCHIPELAGO_SOURCES
+echo                 archipelago/archipelago_socket.cpp
+echo                 archipelago/archipelago_commands.cpp
+echo             ^)
+echo.
+echo             set^(ARCHIPELAGO_HEADERS
+echo                 archipelago/archipelago_socket.h
+echo                 archipelago/archipelago_integration.h
+echo             ^)
+echo             
+echo             # Add to the build
+echo             set^(ARCHIPELAGO_ENABLED TRUE^)
+echo             add_definitions^(-DARCHIPELAGO_SUPPORT^)
+echo             
+echo         else^(^)
+echo             message^(WARNING "jsoncpp not found - Archipelago support will be disabled"^)
+echo             message^(WARNING "To enable Archipelago support, install jsoncpp via vcpkg:"^)
+echo             message^(WARNING "  vcpkg install jsoncpp:x64-windows ixwebsocket:x64-windows"^)
+echo             set^(ARCHIPELAGO_SOURCES ""^)
+echo             set^(ARCHIPELAGO_HEADERS ""^)
+echo             set^(ARCHIPELAGO_ENABLED FALSE^)
+echo         endif^(^)
+echo     else^(^)
+echo         message^(WARNING "Archipelago source files not found in src/archipelago/"^)
+echo         set^(ARCHIPELAGO_SOURCES ""^)
+echo         set^(ARCHIPELAGO_HEADERS ""^)
+echo         set^(ARCHIPELAGO_ENABLED FALSE^)
+echo     endif^(^)
+echo else^(^)
+echo     message^(STATUS "Archipelago support disabled by NO_ARCHIPELAGO option"^)
+echo     set^(ARCHIPELAGO_SOURCES ""^)
+echo     set^(ARCHIPELAGO_HEADERS ""^)
+echo     set^(ARCHIPELAGO_ENABLED FALSE^)
+echo endif^(^)
+echo.
+) > archipelago_patch.txt
+
+:: Now process the file
+echo [*] Patching CMakeLists.txt...
+set PATCH_APPLIED=0
+set IN_ARCHIPELAGO_SECTION=0
+set FOUND_ARCHIPELAGO_SOURCES=0
+set FOUND_PROJECT_LIBRARIES=0
+set LINE_NUMBER=0
+
+:: First pass - insert the configuration block
+(
+    for /f "usebackq delims=" %%a in ("%CMAKE_FILE%") do (
+        set "LINE=%%a"
+        set /a LINE_NUMBER+=1
+        
+        :: Check if we found the ARCHIPELAGO_SOURCES section
+        echo !LINE! | findstr /C:"ARCHIPELAGO_SOURCES" >nul 2>&1
+        if !errorlevel! equ 0 (
+            if !PATCH_APPLIED! equ 0 (
+                :: Insert our patch before the existing ARCHIPELAGO_SOURCES
+                type archipelago_patch.txt
+                echo.
+                set PATCH_APPLIED=1
+                set FOUND_ARCHIPELAGO_SOURCES=1
+            )
+            :: Skip the old ARCHIPELAGO_SOURCES block
+            set IN_ARCHIPELAGO_SECTION=1
+        )
+        
+        :: Check if we're in the old block and need to skip
+        if !IN_ARCHIPELAGO_SECTION! equ 1 (
+            echo !LINE! | findstr /C:")" >nul 2>&1
+            if !errorlevel! equ 0 (
+                :: This is the closing parenthesis, skip it and end the section
+                set IN_ARCHIPELAGO_SECTION=0
+            )
+            :: Skip all lines in the old ARCHIPELAGO section
+        ) else (
+            :: Output the line
+            echo(!LINE!
+        )
+    )
+    
+    :: If we didn't find ARCHIPELAGO_SOURCES, add it before GAME_SOURCES
+    if !PATCH_APPLIED! equ 0 (
+        echo.
+        type archipelago_patch.txt
+        echo.
+    )
+) > "%TEMP_FILE%"
+
+:: Second pass - add the PROJECT_LIBRARIES section
+echo [*] Adding library configuration...
+(
+    for /f "usebackq delims=" %%a in ("%TEMP_FILE%") do (
+        set "LINE=%%a"
+        
+        :: Output the line first
+        echo(!LINE!
+        
+        :: Check if this line sets PROJECT_LIBRARIES
+        echo !LINE! | findstr /C:"set( PROJECT_LIBRARIES" >nul 2>&1
+        if !errorlevel! equ 0 (
+            if !FOUND_PROJECT_LIBRARIES! equ 0 (
+                :: Add our library configuration after PROJECT_LIBRARIES
+                echo.
+                echo # Add Archipelago libraries if enabled
+                echo if^(ARCHIPELAGO_ENABLED^)
+                echo     list^(APPEND PROJECT_LIBRARIES ${ARCHIPELAGO_LIBRARIES}^)
+                echo     if^(ARCHIPELAGO_INCLUDE_DIRS^)
+                echo         include_directories^(${ARCHIPELAGO_INCLUDE_DIRS}^)
+                echo     endif^(^)
+                echo endif^(^)
+                set FOUND_PROJECT_LIBRARIES=1
+            )
+        )
+    )
+) > "%CMAKE_FILE%"
+
+:: Clean up
+del archipelago_patch.txt >nul 2>&1
+del "%TEMP_FILE%" >nul 2>&1
+
+echo.
+echo [SUCCESS] CMakeLists.txt has been patched!
+echo.
+echo [*] Backup saved as: %BACKUP_FILE%
+echo [*] Archipelago support has been added
+echo.
+echo Next steps:
+echo   1. Install required packages: vcpkg install jsoncpp:x64-windows ixwebsocket:x64-windows
+echo   2. Run build_selaco.bat to build with Archipelago support
+echo.
+echo If something went wrong, restore from: %BACKUP_FILE%
+echo.
+pause

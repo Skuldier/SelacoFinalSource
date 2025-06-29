@@ -58,16 +58,18 @@ if not exist "%VCPKG_ROOT%\vcpkg.exe" (
     set USE_VCPKG=1
     echo [*] Found vcpkg at %VCPKG_ROOT%
     
-    :: Check for required packages
+    :: Check for required packages - Fixed detection
     echo [*] Checking vcpkg packages...
     set MISSING_PACKAGES=
     
-    "%VCPKG_ROOT%\vcpkg.exe" list | findstr /C:"jsoncpp:x64-windows" >nul 2>&1
+    :: Check jsoncpp
+    "%VCPKG_ROOT%\vcpkg.exe" list jsoncpp:x64-windows >nul 2>&1
     if %errorlevel% neq 0 (
         set MISSING_PACKAGES=!MISSING_PACKAGES! jsoncpp:x64-windows
     )
     
-    "%VCPKG_ROOT%\vcpkg.exe" list | findstr /C:"ixwebsocket:x64-windows" >nul 2>&1
+    :: Check ixwebsocket
+    "%VCPKG_ROOT%\vcpkg.exe" list ixwebsocket:x64-windows >nul 2>&1
     if %errorlevel% neq 0 (
         set MISSING_PACKAGES=!MISSING_PACKAGES! ixwebsocket:x64-windows
     )
@@ -84,9 +86,13 @@ if not exist "%VCPKG_ROOT%\vcpkg.exe" (
                 pause
                 exit /b 1
             )
+        ) else (
+            echo [WARNING] Continuing without Archipelago support
+            set USE_ARCHIPELAGO=0
         )
     ) else (
         echo [*] All required vcpkg packages are installed
+        set USE_ARCHIPELAGO=1
     )
 )
 
@@ -115,9 +121,15 @@ echo     Architecture: %ARCH%
 if "%USE_VCPKG%"=="1" (
     echo     vcpkg: ENABLED
     echo     Toolchain: %VCPKG_TOOLCHAIN%
+    if "%USE_ARCHIPELAGO%"=="1" (
+        echo     Archipelago: ENABLED
+    ) else (
+        echo     Archipelago: DISABLED (missing packages)
+    )
 ) else (
     echo     vcpkg: DISABLED
     echo     mbedTLS: FORCE_INTERNAL_MBEDTLS=ON
+    echo     Archipelago: DISABLED
 )
 echo.
 
@@ -128,9 +140,12 @@ if "%USE_VCPKG%"=="1" (
     :: With vcpkg
     set CMAKE_CMD=!CMAKE_CMD! -DCMAKE_TOOLCHAIN_FILE="%VCPKG_TOOLCHAIN%"
     set CMAKE_CMD=!CMAKE_CMD! -DVCPKG_TARGET_TRIPLET=x64-windows
+    if "%USE_ARCHIPELAGO%"=="0" (
+        set CMAKE_CMD=!CMAKE_CMD! -DNO_ARCHIPELAGO=ON
+    )
 ) else (
-    :: Without vcpkg - use internal mbedTLS
-    set CMAKE_CMD=!CMAKE_CMD! -DFORCE_INTERNAL_MBEDTLS=ON
+    :: Without vcpkg - use internal mbedTLS and disable Archipelago
+    set CMAKE_CMD=!CMAKE_CMD! -DFORCE_INTERNAL_MBEDTLS=ON -DNO_ARCHIPELAGO=ON
 )
 
 :: Add common flags
@@ -152,9 +167,16 @@ if %errorlevel% neq 0 (
 echo.
 echo [*] Configuration successful!
 if "%USE_VCPKG%"=="1" (
-    echo [*] Using vcpkg packages for dependencies
+    if "%USE_ARCHIPELAGO%"=="1" (
+        echo [*] Using vcpkg packages for dependencies
+        echo [*] Archipelago support will be built
+    ) else (
+        echo [*] Using vcpkg packages for basic dependencies
+        echo [*] Archipelago support DISABLED due to missing packages
+    )
 ) else (
     echo [*] mbedTLS will be built internally for SSL/TLS support
+    echo [*] Archipelago support DISABLED
 )
 echo.
 
@@ -181,12 +203,16 @@ echo Executable should be in: %CD%\%BUILD_TYPE%\ (or %CD%\ depending on generato
 echo.
 
 :: Check if Archipelago support was built
-if exist "src\archipelago\archipelago.lib" (
-    echo [*] Archipelago support: ENABLED
-) else if exist "src\archipelago\%BUILD_TYPE%\archipelago.lib" (
-    echo [*] Archipelago support: ENABLED
+if "%USE_ARCHIPELAGO%"=="1" (
+    if exist "src\archipelago\archipelago.lib" (
+        echo [*] Archipelago support: ENABLED
+    ) else if exist "src\archipelago\%BUILD_TYPE%\archipelago.lib" (
+        echo [*] Archipelago support: ENABLED
+    ) else (
+        echo [*] Archipelago support: Built but library not found
+    )
 ) else (
-    echo [*] Archipelago support: Not detected
+    echo [*] Archipelago support: DISABLED
 )
 echo.
 
