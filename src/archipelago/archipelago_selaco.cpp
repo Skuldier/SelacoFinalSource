@@ -31,25 +31,6 @@ extern int consoleplayer;
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #endif
 
-// Cheat flags - these values are from d_player.h
-enum {
-    CF_NOCLIP       = 1,      // No clipping, walk through barriers.
-    CF_ALLMAP       = 2,      // Automap shows everything
-    CF_GODMODE      = 4,      // Player is invulnerable
-    CF_NOMOMENTUM   = 8,      // Not really a cheat, just a debug aid.
-    CF_NOTARGET     = 16,     // [RH] Monsters don't target
-    CF_FLY          = 32,     // [RH] Flying player
-    CF_CHASECAM     = 64,     // [RH] Put camera behind player
-    CF_FROZEN       = 128,    // [RH] Don't let the player move
-    CF_REVERTPLEASE = 256,    // [RH] Stick camera in player's head if he moves
-    CF_STEPLEFT     = 512,    // [RH] Play left footstep sound next time
-    CF_FRIGHTENING  = 1024,   // [RH] Scare monsters away
-    CF_INSTANTWEAPSWITCH = 2048, // [RH] Switch weapons instantly
-    CF_TOTALLYFROZEN = 4096,  // [RH] All players can do is press +use
-    CF_PREDICTING   = 8192,   // [RH] Player movement is being predicted
-    CF_INTERPVIEW   = 16384,  // [RH] view was changed outside of input, so interpolate one frame
-};
-
 // Forward declarations of helper functions
 static bool GiveWeaponToPlayer(player_t* player, const char* weaponName);
 static bool GiveAmmoToPlayer(player_t* player, const char* ammoType, int amount);
